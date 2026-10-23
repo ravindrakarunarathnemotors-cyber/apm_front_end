@@ -441,7 +441,7 @@ export default function VehicleEvidenceModal({ jobId, onHide, onSaved, preDepart
                       {propertyInside === true && (
                         <div className="mt-2 pt-2 border-top">
                           <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
-                            <div className="small text-muted">Take photos or videos of the customer's property inside the vehicle (bags, tools, documents ...).</div>
+                            <div className="small text-muted">Take photos or videos of the customer s property inside the vehicle (bags, tools, documents ...).</div>
                             <PickButtons onPick={(k) => pick(k, null, "PROPERTY")} disabled={readOnly} />
                           </div>
                           <MediaThumbs

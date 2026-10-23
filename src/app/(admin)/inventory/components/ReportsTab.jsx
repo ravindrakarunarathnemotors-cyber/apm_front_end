@@ -205,7 +205,7 @@ function MarginReport() {
             ))}</tbody>
           </Table>
         )}
-        <small className="text-muted d-block mt-2">Revenue = issued qty × the job's unit price. Cost = average cost at the time of issue.</small>
+        <small className="text-muted d-block mt-2">Revenue = issued qty × the job s unit price. Cost = average cost at the time of issue.</small>
       </Panel>
     </>
   );

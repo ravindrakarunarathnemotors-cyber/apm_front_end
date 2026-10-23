@@ -63,7 +63,7 @@ function AdjustModal({ onClose }) {
       <Modal.Header closeButton>
         <Modal.Title className="fs-5 d-flex align-items-center gap-2">
           <span className="d-inline-flex align-items-center justify-content-center rounded-circle bg-warning-subtle text-warning-emphasis" style={{ width: 40, height: 40 }}><Icon icon="mdi:tune-variant" width="22" height="22" /></span>
-          <span>Request stock adjustment<div className="small text-muted fw-normal">Needs a stock manager's approval</div></span>
+          <span>Request stock adjustment<div className="small text-muted fw-normal">Needs a stock manager s approval</div></span>
         </Modal.Title>
       </Modal.Header>
       <Modal.Body className="bg-body-tertiary">
@@ -133,7 +133,7 @@ function AdjustModal({ onClose }) {
           </div>
         )}
         {after !== null && after < 0 && <div className="small text-danger mt-2">This would take the stock below zero.</div>}
-        <Alert variant="light" className="border small mt-3 mb-0 d-flex gap-2"><Icon icon="mdi:shield-check-outline" width="20" height="20" className="text-primary flex-shrink-0" /><div>Stock changes only after a stock manager approves. The approver's name and time are saved with the adjustment.</div></Alert>
+        <Alert variant="light" className="border small mt-3 mb-0 d-flex gap-2"><Icon icon="mdi:shield-check-outline" width="20" height="20" className="text-primary flex-shrink-0" /><div>Stock changes only after a stock manager approves. The approvers name and time are saved with the adjustment.</div></Alert>
       </Modal.Body>
       <Modal.Footer>
         <Button variant="secondary" onClick={onClose}><Icon icon="mdi:close" width="18" height="18" /> Cancel</Button>
