@@ -14,6 +14,9 @@ import BayAllocationModal from "./BayAllocationModal";
 import VehicleEvidenceModal from "./VehicleEvidenceModal";
 import VehicleJobInspectionModal from "./VehicleJobInspectionModal"; // Mechanical stage 7
 import SparePartsModal from "./SparePartsModal"; // Spare Part Review & Order
+import CustomerApprovalModal from "./CustomerApprovalModal"; // Customer Approval (after the spare parts stage)
+import InternalInspectionModal from "./InternalInspectionModal"; // Internal Inspection - 1 (after Customer Approval)
+import JobActivationModal from "./JobActivationModal"; // Job Activation (after Internal Inspection - 1)
 import PreDepartmentActions from "./PreDepartmentActions"; // Evidence first, then Select Department
 import DamageReportModal from "./DamageReportModal"; // stage 8: vehicle damages report (can be skipped)
 import { getDepartmentUi } from "./departmentConfig";
@@ -50,6 +53,9 @@ export default function JobActionsCell({ job, block = false }) {
   const [reportOpen, setReportOpen] = useState(false);
   const [inspOpen, setInspOpen] = useState(false);
   const [spareOpen, setSpareOpen] = useState(false);
+  const [approvalOpen, setApprovalOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const [activationOpen, setActivationOpen] = useState(false);
   const [preEvOpen, setPreEvOpen] = useState(false); // stage 4 "Vehicle Evidence" (view / customer link) after the department is selected
 
   const hasTeam = Boolean(job.requiresTeam || teamDept?.hasTeamAllocation);
@@ -104,6 +110,27 @@ export default function JobActionsCell({ job, block = false }) {
     list.push({ key: "spare", label: open ? "Spare Parts" : "Parts", icon: "mdi:cog-transfer-outline", current: open, run: () => setSpareOpen(true) });
   }
 
+  // Customer Approval (departments that use it: right after the spare parts stage)
+  const approvalStage = evDept?.approvalStageNo;
+  if (evDept?.hasCustomerApproval && approvalStage && job.stageNo >= approvalStage && live) {
+    const open = job.stageNo === approvalStage;
+    list.push({ key: "approval", label: open ? "Customer Approval" : "Approval", icon: "mdi:account-check-outline", current: open, run: () => setApprovalOpen(true) });
+  }
+
+  // Internal Inspection - 1 (after Customer Approval)
+  const internalStage = evDept?.internalStageNo;
+  if (evDept?.hasInternalInspection && internalStage && job.stageNo >= internalStage && live) {
+    const open = job.stageNo === internalStage;
+    list.push({ key: "internal", label: open ? "Internal Inspection" : "Inspection 1", icon: "mdi:clipboard-list-outline", current: open, run: () => setInternalOpen(true) });
+  }
+
+  // Job Activation (after Internal Inspection - 1)
+  const activationStage = evDept?.activationStageNo;
+  if (evDept?.hasJobActivation && activationStage && job.stageNo >= activationStage && live) {
+    const open = job.stageNo === activationStage;
+    list.push({ key: "activation", label: open ? "Job Activation" : "Activation", icon: "mdi:rocket-launch-outline", current: open, run: () => setActivationOpen(true) });
+  }
+
   const current = list.find((a) => a.current);
   const others = list.filter((a) => a !== current);
   // team / bay saved (stage completed) -> the Vehicle Job Inspection window opens by itself (Mechanical)
@@ -135,7 +162,10 @@ export default function JobActionsCell({ job, block = false }) {
         </div>
       )}
 
-      {spareOpen && <SparePartsModal key={`sp${job.id}`} jobId={job.id} onHide={() => setSpareOpen(false)} onSaved={({ stageCompleted }) => { if (stageCompleted && hasReport) setReportOpen(true); }} />}
+      {spareOpen && <SparePartsModal key={`sp${job.id}`} jobId={job.id} onHide={() => setSpareOpen(false)} onSaved={({ stageCompleted }) => { if (stageCompleted) { if (evDept?.hasCustomerApproval) setApprovalOpen(true); else if (hasReport) setReportOpen(true); } }} />}
+      {approvalOpen && <CustomerApprovalModal key={`ca${job.id}`} jobId={job.id} onHide={() => setApprovalOpen(false)} onSaved={({ stageCompleted }) => { if (stageCompleted && evDept?.hasInternalInspection) setInternalOpen(true); }} />}
+      {internalOpen && <InternalInspectionModal key={`ii${job.id}`} jobId={job.id} onHide={() => setInternalOpen(false)} onSaved={({ stageCompleted }) => { if (stageCompleted && evDept?.hasJobActivation) setActivationOpen(true); }} />}
+      {activationOpen && <JobActivationModal key={`ja${job.id}`} jobId={job.id} onHide={() => setActivationOpen(false)} />}
       {inspOpen && <VehicleJobInspectionModal key={`insp${job.id}`} jobId={job.id} onHide={() => setInspOpen(false)} onSaved={({ stageCompleted }) => { if (stageCompleted) { if (evDept?.hasSpareParts) setSpareOpen(true); else if (hasReport) setReportOpen(true); } }} />}
       {preEvOpen && <VehicleEvidenceModal key={`pre${job.id}`} jobId={job.id} preDepartment onHide={() => setPreEvOpen(false)} />}
       {viewOpen && <JobDetailsModal jobId={job.id} onHide={() => setViewOpen(false)} />}

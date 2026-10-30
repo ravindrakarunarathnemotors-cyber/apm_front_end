@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Badge, Button, Card, Col, Dropdown, FormControl, FormSelect, InputGroup, ProgressBar, Row, Spinner, Table } from "react-bootstrap";
+import { Badge, Button, Card, Col, Dropdown, FormControl, FormSelect, InputGroup, Pagination, ProgressBar, Row, Spinner, Table } from "react-bootstrap";
 import { Icon } from "@iconify/react";
 import JobStartBadge from "./JobStartBadge";
 import Swal from "sweetalert2";
@@ -10,6 +10,7 @@ import PreDepartmentActions, { OPEN_COMPLAINT_EVENT } from "./PreDepartmentActio
 import ComplaintModal from "./ComplaintModal"; // Evidence first, then Select Department
 import { getDepartmentUi } from "./departmentConfig";
 import { useGetDepartmentsQuery, useSetJobDepartmentMutation } from "@/store/features/apiSlice";
+import { useGetJobsPageQuery } from "./jobsPageApi";
 
 // Stage 4 = "Department". A job waiting at this stage gets a "Select Department" option in the table.
 const DEPARTMENT_STAGE_NO = 4;
@@ -70,30 +71,38 @@ function DeptBadge({ name }) {
   );
 }
 
+// Stage column: a coloured status chip with the stage name, and (for departments that use the Job Activation stage)
+// whether the job is activated. No progress bar.
+const tintOf = (c, a) => `color-mix(in srgb, ${c} ${a}%, white)`;
 function StageCell({ job }) {
-  const total = job.totalStages || 0;
-  const completed = job.completedStages || 0;
-  const done = job.status === "COMPLETED";
-  const cancelled = job.status === "CANCELLED";
-  const pct = total ? Math.round((completed / total) * 100) : 0;
-
+  const done = job.status === "COMPLETED", cancelled = job.status === "CANCELLED";
+  const live = !done && !cancelled;
+  const color = done ? "#16a34a" : cancelled ? "#64748b" : getDepartmentUi(job.departmentName).color;
+  const icon = done ? "mdi:check-circle" : cancelled ? "mdi:close-circle" : "mdi:progress-clock";
   return (
-    <div style={{ minWidth: 190 }}>
-      <div className="d-flex justify-content-between align-items-center mb-1">
-        <Badge bg={cancelled ? "danger" : done ? "success" : "primary"} className="fw-semibold">
-          {cancelled ? "Cancelled" : done ? "Completed" : `Stage ${job.stageNo} · ${job.stageName ?? "-"}`}
-        </Badge>
-        <small className="text-muted ms-2">
-          {completed}/{total}
-        </small>
+    <div style={{ minWidth: 200, maxWidth: "100%" }}>
+      <div className="d-inline-flex align-items-center gap-2 rounded-pill px-3 py-1 fw-semibold small" style={{ color, background: tintOf(color, 11), border: `1px solid ${tintOf(color, 28)}` }}>
+        <Icon icon={icon} width="16" height="16" />
+        {done ? "Completed" : cancelled ? "Cancelled" : (job.stageName ?? "-")}
       </div>
-      <ProgressBar now={pct} variant={cancelled ? "danger" : done ? "success" : "primary"} style={{ height: 6 }} />
+      <div className="d-flex flex-wrap align-items-center gap-2 mt-1">
+        {live && <span className="small text-muted">Stage {job.stageNo}</span>}
+        {job.activationEnabled && (job.activatedAt ? (
+          <span className="d-inline-flex align-items-center gap-1 small fw-semibold rounded-pill px-2" title={new Date(job.activatedAt).toLocaleString()} style={{ color: "#15803d", background: "#dcfce7" }}>
+            <Icon icon="mdi:rocket-launch" width="14" height="14" /> Job activated
+          </span>
+        ) : live ? (
+          <span className="d-inline-flex align-items-center gap-1 small rounded-pill px-2" style={{ color: "#92400e", background: "#fef3c7" }}>
+            <Icon icon="mdi:rocket-launch-outline" width="14" height="14" /> Not activated
+          </span>
+        ) : null)}
+      </div>
       <JobStartBadge job={job} />
     </div>
   );
 }
 
-export default function JobsTable({ jobs = [], loading = false, onView }) {
+export default function JobsTable({ onView }) {
   const [query, setQuery] = useState("");
   const [consultant, setConsultant] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState(""); // "" = all, NO_DEPARTMENT = not selected yet
@@ -150,34 +159,34 @@ export default function JobsTable({ jobs = [], loading = false, onView }) {
     );
   };
 
-  // Filter options built from the jobs themselves
-  const departmentNames = useMemo(
-    () => [...new Set(jobs.map((j) => j.departmentName).filter(Boolean))].sort(),
-    [jobs]
-  );
-  const consultants = useMemo(
-    () => [...new Set(jobs.map((j) => j.consultantName).filter(Boolean))].sort(),
-    [jobs]
-  );
-  const stages = useMemo(() => {
-    const map = new Map();
-    jobs.forEach((j) => map.set(j.stageNo, j.stageName));
-    return [...map.entries()].sort((a, b) => a[0] - b[0]);
-  }, [jobs]);
+  // Server-side paging + filtering: only the current page is loaded from the database
+  const [pageSize, setPageSize] = useState(10);
+  const [page, setPage] = useState(1);
+  const [debounced, setDebounced] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(query.trim()), 350);
+    return () => clearTimeout(t);
+  }, [query]);
+  useEffect(() => { setPage(1); }, [debounced, consultant, departmentFilter, stage, pageSize]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase().replace(/[\s-]/g, "");
-    return jobs.filter((j) => {
-      if (consultant && j.consultantName !== consultant) return false;
-      if (departmentFilter === NO_DEPARTMENT && j.departmentName) return false;
-      if (departmentFilter && departmentFilter !== NO_DEPARTMENT && j.departmentName !== departmentFilter) return false;
-      if (stage && String(j.stageNo) !== stage) return false;
-      if (!q) return true;
-      return [j.jobNo, j.customerName, j.contactNumber, j.regNo].some((v) =>
-        String(v ?? "").toLowerCase().replace(/[\s-]/g, "").includes(q)
-      );
-    });
-  }, [jobs, query, consultant, departmentFilter, stage]);
+  const { data, isLoading: loading, isFetching } = useGetJobsPageQuery(
+    { page, pageSize, search: debounced, consultant, department: departmentFilter, stage },
+    { pollingInterval: 30000 }
+  );
+  const pageRows = data?.rows ?? [];
+  const total = data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const current = Math.min(page, pageCount);
+  const consultants = data?.filters?.consultants ?? [];
+  const departmentNames = data?.filters?.departments ?? [];
+  const stages = (data?.filters?.stages ?? []).map((s) => [s.stageNo, s.stageName]);
+  const firstShown = total === 0 ? 0 : (current - 1) * pageSize + 1;
+  const lastShown = Math.min(current * pageSize, total);
+  const pageNumbers = useMemo(() => {
+    const out = [];
+    for (let n = 1; n <= pageCount; n++) if (n === 1 || n === pageCount || Math.abs(n - current) <= 1) out.push(n);
+    return out;
+  }, [pageCount, current]);
 
   const hasFilters = query || consultant || departmentFilter || stage;
   const clearFilters = () => {
@@ -193,7 +202,7 @@ export default function JobsTable({ jobs = [], loading = false, onView }) {
         <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
           <h5 className="mb-0">
             <Icon icon="mdi:clipboard-list-outline" width="22" height="22" className="me-1" />
-            Jobs <Badge bg="secondary" pill>{filtered.length}</Badge>
+            Jobs <Badge bg="secondary" pill>{total}</Badge>{isFetching && !loading && <Spinner animation="border" size="sm" className="ms-2" />}
           </h5>
         </div>
 
@@ -249,10 +258,10 @@ export default function JobsTable({ jobs = [], loading = false, onView }) {
           <div className="text-center text-muted py-5">
             <Spinner animation="border" size="sm" className="me-2" /> Loading jobs...
           </div>
-        ) : filtered.length === 0 ? (
+        ) : total === 0 ? (
           <div className="text-center text-muted py-5">
             <Icon icon="mdi:clipboard-text-off-outline" width="40" height="40" />
-            <div className="mt-2">{jobs.length === 0 ? "No jobs created yet." : "No jobs match your filters."}</div>
+            <div className="mt-2">{hasFilters ? "No jobs match your filters." : "No jobs created yet."}</div>
           </div>
         ) : (
           <>
@@ -272,7 +281,7 @@ export default function JobsTable({ jobs = [], loading = false, onView }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((j) => (
+                  {pageRows.map((j) => (
                     <tr key={j.id}>
                       <td className="fw-semibold text-nowrap">{j.jobNo}</td>
                       <td>
@@ -296,7 +305,7 @@ export default function JobsTable({ jobs = [], loading = false, onView }) {
 
             {/* Phone: cards */}
             <div className="d-md-none p-2 d-flex flex-column gap-2">
-              {filtered.map((j) => (
+              {pageRows.map((j) => (
                 <div key={j.id} className="border rounded p-2 bg-white">
                   <div className="d-flex justify-content-between align-items-start">
                     <strong>{j.jobNo}</strong>
@@ -318,6 +327,29 @@ export default function JobsTable({ jobs = [], loading = false, onView }) {
           </>
         )}
       </Card.Body>
+      {!loading && total > 0 && (
+        <Card.Footer className="bg-transparent d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <div className="d-flex align-items-center gap-2 small text-muted">
+            <span>Rows</span>
+            <FormSelect size="sm" style={{ width: 80 }} value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}>
+              {[10, 25, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
+            </FormSelect>
+            <span>Showing {firstShown}-{lastShown} of {total}</span>
+          </div>
+          {pageCount > 1 && (
+            <Pagination size="sm" className="mb-0">
+              <Pagination.Prev disabled={current === 1} onClick={() => setPage(current - 1)} />
+              {pageNumbers.map((n, i) => (
+                <span key={n} className="d-inline-flex">
+                  {i > 0 && n - pageNumbers[i - 1] > 1 && <Pagination.Ellipsis disabled />}
+                  <Pagination.Item active={n === current} onClick={() => setPage(n)}>{n}</Pagination.Item>
+                </span>
+              ))}
+              <Pagination.Next disabled={current === pageCount} onClick={() => setPage(current + 1)} />
+            </Pagination>
+          )}
+        </Card.Footer>
+      )}
       {complaintJobId && <ComplaintModal key={`c${complaintJobId}`} jobId={complaintJobId} onHide={() => setComplaintJobId(null)} />}
       {preEvJobId && <VehicleEvidenceModal key={`pre${preEvJobId}`} jobId={preEvJobId} preDepartment onHide={() => setPreEvJobId(null)} />}
     </Card>

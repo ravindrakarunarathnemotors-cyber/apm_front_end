@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Icon } from "@iconify/react";
-import { useGetDepartmentsQuery, useGetJobsQuery } from "@/store/features/apiSlice";
+import { useGetDepartmentsQuery } from "@/store/features/apiSlice";
+import { useGetJobsSummaryQuery } from "./jobsPageApi";
 
 // Tab bar shared by the Jobs Dashboard (ALL) and every department page. Each tab is a link to that page.
 // Each tab shows the number of jobs still in progress; the number blinks softly, and flashes when it changes.
@@ -23,6 +24,15 @@ const CSS = `
 @keyframes jt-flash { 0% { transform:scale(1); } 30% { transform:scale(1.55); } 100% { transform:scale(1); } }
 .jt-count { animation: jt-blink 1.6s ease-in-out infinite; }
 .jt-count.jt-changed { animation: jt-flash .7s ease-out 2, jt-blink 1.6s ease-in-out .7s infinite; }
+.jt-nav { -webkit-overflow-scrolling: touch; scrollbar-width: none; scroll-snap-type: x proximity; }
+.jt-nav::-webkit-scrollbar { display: none; }
+.jt-nav .nav-item { scroll-snap-align: start; }
+.jt-link { font-size: 17px; padding: 12px 20px; border-radius: 12px; }
+@media (max-width: 767.98px) {
+  .jt-link { font-size: 14px; padding: 8px 12px; border-radius: 10px; gap: 6px !important; }
+  .jt-link svg { width: 20px; height: 20px; }
+  .jt-count { min-width: 22px !important; height: 22px !important; font-size: 12px !important; padding: 0 6px !important; }
+}
 @media (prefers-reduced-motion: reduce) { .jt-count, .jt-count.jt-changed { animation: none; } }
 `;
 
@@ -55,8 +65,8 @@ function Count({ value, light }) {
 
 export default function JobsTabs() {
   const pathname = usePathname() || "";
-  // same list the dashboards use; refreshed every 30 seconds
-  const { data: jobs = [] } = useGetJobsQuery(undefined, { pollingInterval: 30000 });
+  // counts only (GET /jobs/summary), refreshed every 30 seconds
+  const { data: summary } = useGetJobsSummaryQuery(undefined, { pollingInterval: 30000 });
 
   // any other active department (added later in the department master) also gets its own tab, so no tab goes missing
   const { data: depts = [] } = useGetDepartmentsQuery();
@@ -72,12 +82,12 @@ export default function JobsTabs() {
   }, [depts]);
 
   const counts = useMemo(() => {
-    const open = jobs.filter((j) => j.status === "IN_PROGRESS");
-    return tabs.map((t) => (t.match ? open.filter((j) => (j.departmentName || "").toLowerCase() === t.match).length : open.length));
-  }, [jobs, tabs]);
+    const deps = summary?.departments ?? [];
+    return tabs.map((t) => (t.match ? (deps.find((d) => (d.name || "").toLowerCase() === t.match)?.active ?? 0) : (summary?.active ?? 0)));
+  }, [summary, tabs]);
 
   return (
-    <nav className="mb-3 overflow-auto" aria-label="Departments">
+    <nav className="jt-nav mb-3 overflow-auto" aria-label="Departments">
       <style>{CSS}</style>
       <ul className="nav nav-pills flex-nowrap gap-2 pb-1 mb-0" style={{ whiteSpace: "nowrap" }}>
         {tabs.map((t, i) => {
@@ -86,10 +96,9 @@ export default function JobsTabs() {
             <li className="nav-item" key={t.href}>
               <Link
                 href={t.href}
-                className="nav-link d-inline-flex align-items-center gap-2 fw-semibold border shadow-sm"
+                className="jt-link nav-link d-inline-flex align-items-center gap-2 fw-semibold border shadow-sm"
                 aria-current={active ? "page" : undefined}
                 style={{
-                  fontSize: 17, padding: "12px 20px", borderRadius: 12,
                   ...(active ? { backgroundColor: t.color, borderColor: t.color, color: "#fff" } : { color: t.color, backgroundColor: "#fff" }),
                 }}
               >

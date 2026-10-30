@@ -6,14 +6,10 @@ import { Icon } from "@iconify/react";
 import CustomerWizard from "./components/CustomerWizard";
 import JobsTable from "./components/JobsTable";
 import JobDetailsModal from "./components/JobDetailsModal";
-import { useGetJobsQuery } from "@/store/features/apiSlice";
 
 const CrmPage = () => {
   const [showForm, setShowForm] = useState(false);
   const [viewJobId, setViewJobId] = useState(null); // job opened in the View modal
-
-  // Jobs come from the database. Starting a job refreshes this list automatically.
-  const { data: jobs = [], isLoading } = useGetJobsQuery();
 
   return (
     <>
@@ -52,7 +48,7 @@ const CrmPage = () => {
       </Collapse>
 
       {/* Jobs created so far, with their current stage */}
-      <JobsTable jobs={jobs} loading={isLoading} onView={(job) => setViewJobId(job.id)} />
+      <JobsTable onView={(job) => setViewJobId(job.id)} />
 
       {/* View: full details + timeline of a job */}
       <JobDetailsModal jobId={viewJobId} onHide={() => setViewJobId(null)} />

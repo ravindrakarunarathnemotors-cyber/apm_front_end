@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import IconifyIcon from '@/components/wrappers/IconifyIcon';
 import ThemeModeToggle from './components/ThemeModeToggle';
 import Notifications from './components/Notifications';
@@ -14,6 +14,44 @@ const TopNavigationBar = () => {
   const { scrollY } = useScrollEvent();
   const [searchQuery, setSearchQuery] = useState('');
   const [showParcelTimeline, setShowParcelTimeline] = useState(false);
+
+  /* ---------- Full screen ---------- */
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fsSupported, setFsSupported] = useState(false);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const el = document.documentElement;
+    setFsSupported(!!(el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen));
+
+    const onChange = () => {
+      setIsFullscreen(!!(document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement));
+    };
+    onChange();
+    document.addEventListener('fullscreenchange', onChange);
+    document.addEventListener('webkitfullscreenchange', onChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      document.removeEventListener('webkitfullscreenchange', onChange);
+    };
+  }, []);
+
+  const toggleFullscreen = async () => {
+    const el = document.documentElement;
+    try {
+      if (!isFullscreen) {
+        if (el.requestFullscreen) await el.requestFullscreen({ navigationUI: 'hide' });
+        else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+        else if (el.msRequestFullscreen) el.msRequestFullscreen();
+      } else {
+        if (document.exitFullscreen) await document.exitFullscreen();
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        else if (document.msExitFullscreen) document.msExitFullscreen();
+      }
+    } catch (err) {
+      console.error('Fullscreen error:', err);
+    }
+  };
 
   const handleSearchChange = (e) => {
     setSearchQuery(e.target.value);
@@ -52,18 +90,17 @@ const TopNavigationBar = () => {
 
   return (
     <>
-      <div className="topbar d-print-none sticky-top py-1 px-3">
-        <div className="container-fluid px-2">
+      <div className="topbar kz-topbar d-print-none sticky-top">
+        <div className="container-fluid kz-topbar-container">
           <nav
             className={clsx(
-              'topbar-custom d-flex justify-content-between align-items-center px-3 rounded-3 transition-all duration-300',
+              'topbar-custom kz-topbar-nav d-flex justify-content-between align-items-center transition-all duration-300',
               {
                 'shadow-lg': scrollY >= 50,
               }
             )}
             id="topbar-custom"
             style={{
-              height: '100px',
               /* Bold Red to Deep Black Gradient */
               background: 'linear-gradient(135deg, #8B0000 0%, #3B0000 40%, #0B0B0B 100%)',
               borderBottom: '1px solid rgba(239, 68, 68, 0.4)',
@@ -73,7 +110,7 @@ const TopNavigationBar = () => {
             }}
           >
             {/* Left Section */}
-            <div className="d-flex align-items-center gap-2">
+            <div className="d-flex align-items-center gap-2 kz-topbar-left">
               <div className="p-1 rounded hover-red-bg cursor-pointer d-flex align-items-center">
                 <LeftSideBarToggle />
               </div>
@@ -84,7 +121,7 @@ const TopNavigationBar = () => {
             </div>
 
             {/* Right Section */}
-            <div className="d-flex align-items-center gap-2">
+            <div className="d-flex align-items-center gap-2 kz-topbar-right">
               {/* Search Box */}
               <div className="hide-phone app-search d-none d-lg-block">
                 <form role="search" action="#" method="get" className="position-relative">
@@ -123,7 +160,22 @@ const TopNavigationBar = () => {
               </div>
 
               {/* Action Icons */}
-              <div className="d-flex align-items-center gap-1 ps-2 border-start border-white-20">
+              <div className="d-flex align-items-center gap-1 ps-2 border-start border-white-20 kz-topbar-actions">
+                {fsSupported && (
+                  <button
+                    type="button"
+                    onClick={toggleFullscreen}
+                    className="kz-fs-btn p-1 rounded-circle hover-red-bg d-flex align-items-center justify-content-center border-0 bg-transparent"
+                    title={isFullscreen ? 'Exit full screen' : 'Full screen'}
+                    aria-label={isFullscreen ? 'Exit full screen' : 'Full screen'}
+                  >
+                    <IconifyIcon
+                      icon={isFullscreen ? 'mdi:fullscreen-exit' : 'mdi:fullscreen'}
+                      className="text-white"
+                      style={{ fontSize: 30 }}
+                    />
+                  </button>
+                )}
                 <div className="p-1 rounded-circle hover-red-bg d-flex align-items-center">
                   <ThemeModeToggle />
                 </div>
@@ -150,8 +202,49 @@ const TopNavigationBar = () => {
         .hover-red-bg:hover {
           background: rgba(239, 68, 68, 0.25);
         }
+        .kz-fs-btn { width: 42px; height: 42px; cursor: pointer; }
+        .kz-fs-btn:focus-visible { outline: 2px solid rgba(239, 68, 68, 0.8); outline-offset: 2px; }
         input::placeholder {
           color: rgba(255, 255, 255, 0.5) !important;
+        }
+
+        /* ---------- Desktop (kalin thibba widihatama) ---------- */
+        .kz-topbar { padding: 4px 16px; }
+        .kz-topbar-container { padding-left: 8px; padding-right: 8px; }
+        .kz-topbar-nav {
+          height: 100px;
+          padding: 0 16px;
+          border-radius: 0.5rem;
+        }
+
+        /* ---------- Tablet + Mobile: full width ---------- */
+        @media (max-width: 991.98px) {
+          .topbar.kz-topbar {
+            padding: 0 !important;
+            margin: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            width: 100% !important;
+            max-width: 100% !important;
+          }
+          .kz-topbar-container {
+            padding: 0 !important;
+            margin: 0 !important;
+            max-width: 100% !important;
+          }
+          .kz-topbar-nav {
+            width: 100%;
+            height: calc(64px + env(safe-area-inset-top));
+            padding: env(safe-area-inset-top) 12px 0 !important;
+            border-radius: 0 !important;
+          }
+          .kz-topbar-right { gap: 4px !important; }
+          .kz-topbar-actions { padding-left: 6px !important; }
+        }
+
+        @media (max-width: 380px) {
+          .kz-topbar-nav { padding-left: 8px !important; padding-right: 8px !important; }
+          .kz-topbar-actions { border-left: 0 !important; padding-left: 0 !important; }
         }
       `}</style>
     </>

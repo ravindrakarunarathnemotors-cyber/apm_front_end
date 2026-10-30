@@ -14,6 +14,9 @@ import BayAllocationModal from "./BayAllocationModal"; // Stage 6 (Wash): bay al
 import VehicleEvidenceModal from "./VehicleEvidenceModal";
 import VehicleJobInspectionModal from "./VehicleJobInspectionModal"; // Mechanical stage 7
 import SparePartsModal from "./SparePartsModal"; // Spare Part Review & Order: Vehicle Job Inspection
+import CustomerApprovalModal from "./CustomerApprovalModal"; // Customer Approval
+import InternalInspectionModal from "./InternalInspectionModal"; // Internal Inspection - 1
+import JobActivationModal from "./JobActivationModal"; // Job Activation
 import DamageReportModal from "./DamageReportModal"; // Stage 8: vehicle damages report (can be skipped)
 import TeamAllocationModal from "./TeamAllocationModal"; // Stage 6: team allocation (team, bay, team leader, PPE ...)
 import ManageTeamsBaysModal from "./ManageTeamsBaysModal"; // create / edit teams and bays any time (not only at stage 6)
@@ -60,20 +63,32 @@ function StatCard({ icon, label, value, color }) {
   );
 }
 
+// Stage column: a coloured status chip with the stage name, and (for departments that use the Job Activation stage)
+// whether the job is activated. No progress bar.
+const tintOf = (c, a) => `color-mix(in srgb, ${c} ${a}%, white)`;
 function StageCell({ job }) {
-  const total = job.totalStages || 0;
-  const completed = job.completedStages || 0;
-  const done = job.status === "COMPLETED";
-  const pct = total ? Math.round((completed / total) * 100) : 0;
+  const done = job.status === "COMPLETED", cancelled = job.status === "CANCELLED";
+  const live = !done && !cancelled;
+  const color = done ? "#16a34a" : cancelled ? "#64748b" : getDepartmentUi(job.departmentName).color;
+  const icon = done ? "mdi:check-circle" : cancelled ? "mdi:close-circle" : "mdi:progress-clock";
   return (
-    <div style={{ minWidth: 180 }}>
-      <div className="d-flex justify-content-between align-items-center mb-1">
-        <Badge bg={done ? "success" : "primary"} className="fw-semibold">
-          {done ? "Completed" : `Stage ${job.stageNo} · ${job.stageName ?? "-"}`}
-        </Badge>
-        <small className="text-muted ms-2">{completed}/{total}</small>
+    <div style={{ minWidth: 200, maxWidth: "100%" }}>
+      <div className="d-inline-flex align-items-center gap-2 rounded-pill px-3 py-1 fw-semibold small" style={{ color, background: tintOf(color, 11), border: `1px solid ${tintOf(color, 28)}` }}>
+        <Icon icon={icon} width="16" height="16" />
+        {done ? "Completed" : cancelled ? "Cancelled" : (job.stageName ?? "-")}
       </div>
-      <ProgressBar now={pct} variant={done ? "success" : "primary"} style={{ height: 6 }} />
+      <div className="d-flex flex-wrap align-items-center gap-2 mt-1">
+        {live && <span className="small text-muted">Stage {job.stageNo}</span>}
+        {job.activationEnabled && (job.activatedAt ? (
+          <span className="d-inline-flex align-items-center gap-1 small fw-semibold rounded-pill px-2" title={new Date(job.activatedAt).toLocaleString()} style={{ color: "#15803d", background: "#dcfce7" }}>
+            <Icon icon="mdi:rocket-launch" width="14" height="14" /> Job activated
+          </span>
+        ) : live ? (
+          <span className="d-inline-flex align-items-center gap-1 small rounded-pill px-2" style={{ color: "#92400e", background: "#fef3c7" }}>
+            <Icon icon="mdi:rocket-launch-outline" width="14" height="14" /> Not activated
+          </span>
+        ) : null)}
+      </div>
       <JobStartBadge job={job} />
     </div>
   );
@@ -150,6 +165,9 @@ export default function DepartmentDashboard({ department }) {
   const [evidenceJobId, setEvidenceJobId] = useState(null);
   const [inspJobId, setInspJobId] = useState(null);
   const [spareJobId, setSpareJobId] = useState(null);
+  const [approvalJobId, setApprovalJobId] = useState(null);
+  const [internalJobId, setInternalJobId] = useState(null);
+  const [activationJobId, setActivationJobId] = useState(null);
   const [preEvJobId, setPreEvJobId] = useState(null); // stage 4 "Vehicle Evidence" (view / customer link)
   const [bayJobId, setBayJobId] = useState(null);
   const [reportJobId, setReportJobId] = useState(null);
@@ -259,6 +277,21 @@ export default function DepartmentDashboard({ department }) {
     if (evDept?.hasSpareParts && evDept.spareStageNo && job.stageNo >= evDept.spareStageNo && live) {
       const open = job.stageNo === evDept.spareStageNo;
       list.push({ key: "spare", label: open ? "Spare Parts" : "Parts", icon: "mdi:cog-transfer-outline", current: open, run: () => setSpareJobId(job.id) });
+    }
+    // Customer Approval (departments that use it: right after the spare parts stage)
+    if (evDept?.hasCustomerApproval && evDept.approvalStageNo && job.stageNo >= evDept.approvalStageNo && live) {
+      const open = job.stageNo === evDept.approvalStageNo;
+      list.push({ key: "approval", label: open ? "Customer Approval" : "Approval", icon: "mdi:account-check-outline", current: open, run: () => setApprovalJobId(job.id) });
+    }
+    // Internal Inspection - 1 (after Customer Approval)
+    if (evDept?.hasInternalInspection && evDept.internalStageNo && job.stageNo >= evDept.internalStageNo && live) {
+      const open = job.stageNo === evDept.internalStageNo;
+      list.push({ key: "internal", label: open ? "Internal Inspection" : "Inspection 1", icon: "mdi:clipboard-list-outline", current: open, run: () => setInternalJobId(job.id) });
+    }
+    // Job Activation (after Internal Inspection - 1)
+    if (evDept?.hasJobActivation && evDept.activationStageNo && job.stageNo >= evDept.activationStageNo && live) {
+      const open = job.stageNo === evDept.activationStageNo;
+      list.push({ key: "activation", label: open ? "Job Activation" : "Activation", icon: "mdi:rocket-launch-outline", current: open, run: () => setActivationJobId(job.id) });
     }
     return list;
   };
@@ -512,7 +545,10 @@ export default function DepartmentDashboard({ department }) {
       {teamJobId && <TeamAllocationModal key={teamJobId} jobId={teamJobId} onHide={() => setTeamJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted && evDept?.hasJobInspection) setInspJobId(jobId); }} />}
       {bayJobId && <BayAllocationModal key={bayJobId} jobId={bayJobId} onHide={() => setBayJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted && evDept?.hasJobInspection) setInspJobId(jobId); }} />}
       {managingBays && bayDept && <ManageTeamsBaysModal baysOnly department={bayDept} onHide={() => setManagingBays(false)} />}
-      {spareJobId && <SparePartsModal key={spareJobId} jobId={spareJobId} onHide={() => setSpareJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted && drDept?.hasDamageReport) setReportJobId(jobId); }} />}
+      {spareJobId && <SparePartsModal key={spareJobId} jobId={spareJobId} onHide={() => setSpareJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted) { if (evDept?.hasCustomerApproval) setApprovalJobId(jobId); else if (drDept?.hasDamageReport) setReportJobId(jobId); } }} />}
+      {approvalJobId && <CustomerApprovalModal key={`ca${approvalJobId}`} jobId={approvalJobId} onHide={() => setApprovalJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted && evDept?.hasInternalInspection) setInternalJobId(jobId); }} />}
+      {internalJobId && <InternalInspectionModal key={`ii${internalJobId}`} jobId={internalJobId} onHide={() => setInternalJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted && evDept?.hasJobActivation) setActivationJobId(jobId); }} />}
+      {activationJobId && <JobActivationModal key={`ja${activationJobId}`} jobId={activationJobId} onHide={() => setActivationJobId(null)} />}
       {inspJobId && <VehicleJobInspectionModal key={inspJobId} jobId={inspJobId} onHide={() => setInspJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted) { if (evDept?.hasSpareParts) setSpareJobId(jobId); else if (drDept?.hasDamageReport) setReportJobId(jobId); } }} />}
       {preEvJobId && <VehicleEvidenceModal key={`pre${preEvJobId}`} jobId={preEvJobId} preDepartment onHide={() => setPreEvJobId(null)} />}
       {evidenceJobId && (

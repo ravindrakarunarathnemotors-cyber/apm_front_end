@@ -33,7 +33,13 @@ const groupOptions = (options) => {
 /* ----------------------------- one type list ----------------------------- */
 function OptionList({ list, selected, onToggle, onClear, color }) {
   const single = list.selection === "SINGLE";
-  const count = list.options.filter((o) => selected.includes(o.id)).length;
+
+  // This stage shows the parent types only. Their child types (with the labour prices) are used in the later stages.
+  // A group that has no parent entry of its own is still shown, so nothing becomes impossible to select.
+  const parentNames = new Set(list.options.filter((o) => !(o.groupName || "").trim()).map((o) => o.name.trim().toLowerCase()));
+  const hasChildren = (o) => list.options.some((c) => (c.groupName || "").trim().toLowerCase() === o.name.trim().toLowerCase());
+  const visible = list.options.filter((o) => !(o.groupName || "").trim() || !parentNames.has(o.groupName.trim().toLowerCase()));
+  const count = visible.filter((o) => selected.includes(o.id)).length;
 
   return (
     <div className="mb-4">
@@ -58,9 +64,9 @@ function OptionList({ list, selected, onToggle, onClear, color }) {
         {list.showInStageNo && ` Item and price are shown in Client Approval - Stage ${list.showInStageNo}.`}
       </div>
 
-      {list.options.length === 0 && <Alert variant="warning" className="py-2 small">No items in this list yet.</Alert>}
+      {visible.length === 0 && <Alert variant="warning" className="py-2 small">No items in this list yet.</Alert>}
 
-      {groupOptions(list.options).map((g) => (
+      {groupOptions(visible).map((g) => (
         <div key={g.name || "_"} className="mb-2">
           {g.name && <div className="fw-semibold small text-uppercase text-muted mb-1">{g.name}</div>}
           <Row className="g-2">
@@ -88,7 +94,7 @@ function OptionList({ list, selected, onToggle, onClear, color }) {
                       <span className="fw-semibold">{o.name}</span>
                       {o.description && <span className="d-block small text-muted">{o.description}</span>}
                     </span>
-                    {list.hasPrice && (
+                    {list.hasPrice && !hasChildren(o) && (
                       <Badge bg={o.price == null ? "secondary" : "success"} className="align-self-center text-nowrap">
                         {money(o.price) || "Price not set"}
                       </Badge>
@@ -389,11 +395,14 @@ function ComplaintForm({ data, onHide, onSaved, startNow }) {
           ))}
           {config.lists.length === 0 && <Alert variant="warning" className="mb-0">No type lists for this department yet.</Alert>}
 
+          {/* "Manage lists" button is switched off here (lists are managed from the Jobs Dashboard -> Repair Type window).
+              To bring it back, remove this comment:
           {canManage && (
             <Button variant="link" size="sm" className="p-0" onClick={() => setShowManage(true)}>
               <Icon icon="mdi:playlist-edit" width="18" height="18" /> Manage lists (add / edit / remove)
             </Button>
           )}
+          */}
         </div>
 
         {/* Approval + vehicle pass */}
@@ -444,7 +453,7 @@ function ComplaintForm({ data, onHide, onSaved, startNow }) {
 
 /* ----------------------------- modal ----------------------------- */
 export default function ComplaintModal({ jobId, onHide, onSaved, startNow = false }) {
-  const { data, isLoading, isError, error, refetch } = useGetJobComplaintQuery(jobId, { skip: !jobId });
+  const { data, isLoading, isError, error, refetch } = useGetJobComplaintQuery(jobId, { skip: !jobId, refetchOnMountOrArgChange: true });
   const ui = data ? getDepartmentUi(data.job.departmentName) : null;
 
   return (
@@ -452,8 +461,7 @@ export default function ComplaintModal({ jobId, onHide, onSaved, startNow = fals
       <Modal.Header closeButton>
         <Modal.Title className="fs-5">
           {ui && <Icon icon={ui.icon} width="24" height="24" color={ui.color} className="me-2" />}
-          Customer Complaint recording / Review
-          {data ? ` / ${data.job.departmentName}` : ""} / Open window
+          Customer Complaint recording
         </Modal.Title>
       </Modal.Header>
 

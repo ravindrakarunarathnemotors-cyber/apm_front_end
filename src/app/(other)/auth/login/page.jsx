@@ -44,8 +44,8 @@ const FEATURES = [
   },
 ];
 
-const Brand = ({ size = "lg" }) => (
-  <div className={`kz-brand ${size}`}>
+const Brand = () => (
+  <div className="kz-brand">
     <div className="kz-logo-img">
       <Image src={LOGO_IMAGE} alt="Karunarathne Auto Zone" width={140} height={140} priority
         style={{ width: "100%", height: "100%", objectFit: "contain" }} />
@@ -75,7 +75,7 @@ const Login = () => {
     <div className="kz-auth">
       <style>{css}</style>
 
-      {/* ================= LEFT ================= */}
+      {/* ================= LEFT (desktop) / TOP HEADER (mobile) ================= */}
       <aside className="kz-hero">
         <div className="kz-photo" style={{ backgroundImage: `url(${HERO_IMAGE})` }} />
         <div className="kz-shade" />
@@ -99,15 +99,13 @@ const Login = () => {
         </div>
       </aside>
 
-      {/* ================= RIGHT ================= */}
+      {/* ================= RIGHT (desktop) / FORM (mobile) ================= */}
       <main className="kz-panel">
         <div className="kz-glow" aria-hidden="true" />
         <div className="kz-stripe br1" aria-hidden="true" />
         <div className="kz-stripe br2" aria-hidden="true" />
 
         <div className="kz-card">
-          <div className="kz-mobile-brand"><Brand size="sm" /></div>
-
           <h1 className="kz-title">Welcome <span>Back</span></h1>
           <p className="kz-sub">Login to your {name} account</p>
 
@@ -121,7 +119,7 @@ const Login = () => {
           </div>
         </div>
 
-        <p className="kz-copy">&copy; {new Date().getFullYear()} {name}. All rights reserved.</p>
+        <p className="kz-copy"> Copyright © 2026 by KARUNARATHNE AUTO ZONE</p>
       </main>
     </div>
   );
@@ -144,10 +142,12 @@ html, body { margin: 0; padding: 0; background: #070709; }
   --red: #e3192b; --red-hot: #ff2a3c; --red-dark: #a80f1c;
   --bg: #070709; --panel: #0b0b0e; --line: rgba(255,255,255,.12); --muted: #a2a2ad;
   position: fixed; inset: 0; z-index: 1000;
-  display: grid; grid-template-columns: 1.2fr 1fr; grid-template-rows: minmax(100%, auto);
-  background: var(--bg); color: #fff; overflow: auto;
+  display: grid; grid-template-columns: 1.2fr 1fr; grid-auto-rows: minmax(100%, auto);
+  background: var(--bg); color: #fff;
+  overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch;
   font-family: 'Inter', system-ui, sans-serif;
 }
+.kz-auth *, .kz-auth *::before, .kz-auth *::after { box-sizing: border-box; }
 
 /* ================= LEFT ================= */
 .kz-hero { position: relative; overflow: hidden; min-height: 100%; background: #08080a; }
@@ -182,7 +182,7 @@ html, body { margin: 0; padding: 0; background: #070709; }
 .kz-stripe.br2 { bottom: 0; right: 0; width: 34%; height: 34%; background: linear-gradient(315deg, rgba(227,25,43,.5), transparent 70%); clip-path: polygon(100% 18%, 100% 30%, 30% 100%, 18% 100%); }
 
 .kz-hero-inner {
-  position: relative; height: 100%; min-height: 100vh; box-sizing: border-box;
+  position: relative; z-index: 2; height: 100%; min-height: 100vh; min-height: 100dvh;
   display: flex; flex-direction: column; align-items: center; justify-content: space-between;
   padding: clamp(40px, 8vh, 80px) 40px clamp(36px, 7vh, 72px);
 }
@@ -194,13 +194,8 @@ html, body { margin: 0; padding: 0; background: #070709; }
 .kz-wordmark { margin-top: 14px; font-family: 'Montserrat', sans-serif; font-style: italic; font-weight: 900; line-height: 1; letter-spacing: -.01em; text-shadow: 0 6px 24px rgba(0,0,0,.6); }
 .kz-wordmark .w1 { display: block; font-size: clamp(30px, 3.6vw, 54px); color: #fff; }
 .kz-wordmark .w2 { display: block; margin-top: 4px; font-size: clamp(22px, 2.5vw, 38px); color: var(--red-hot); letter-spacing: .06em; }
-.kz-tagline { margin-top: 18px; font-size: clamp(11px, .95vw, 14px); font-weight: 500; letter-spacing: .32em; color: #e6e6ec; display: flex; align-items: center; gap: 14px; }
-.kz-tagline i { width: 6px; height: 6px; border-radius: 50%; background: var(--red-hot); box-shadow: 0 0 8px var(--red-hot); }
-
-.kz-brand.sm .kz-logo-img { width: 64px; height: 64px; }
-.kz-brand.sm .kz-wordmark .w1 { font-size: 24px; }
-.kz-brand.sm .kz-wordmark .w2 { font-size: 17px; }
-.kz-brand.sm .kz-tagline { font-size: 10px; letter-spacing: .22em; margin-top: 10px; }
+.kz-tagline { margin-top: 18px; font-size: clamp(11px, .95vw, 14px); font-weight: 500; letter-spacing: .32em; color: #e6e6ec; display: flex; align-items: center; justify-content: center; gap: 14px; }
+.kz-tagline i { width: 6px; height: 6px; border-radius: 50%; background: var(--red-hot); box-shadow: 0 0 8px var(--red-hot); flex-shrink: 0; }
 
 /* features */
 .kz-features { display: flex; justify-content: center; }
@@ -217,7 +212,7 @@ html, body { margin: 0; padding: 0; background: #070709; }
 
 /* ================= RIGHT ================= */
 .kz-panel {
-  position: relative; overflow: hidden; min-height: 100%; box-sizing: border-box;
+  position: relative; overflow: hidden; min-height: 100%;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   padding: 40px clamp(20px, 4vw, 60px) 24px;
   background: linear-gradient(160deg, #111115 0%, var(--panel) 45%, #08080a 100%);
@@ -226,7 +221,7 @@ html, body { margin: 0; padding: 0; background: #070709; }
 .kz-glow { position: absolute; width: 520px; height: 520px; right: -200px; bottom: -200px; border-radius: 50%; background: radial-gradient(circle, rgba(227,25,43,.22), transparent 65%); pointer-events: none; }
 
 .kz-card {
-  position: relative; z-index: 2; width: 100%; max-width: 540px; box-sizing: border-box;
+  position: relative; z-index: 2; width: 100%; max-width: 540px;
   padding: clamp(32px, 6vh, 56px) clamp(24px, 3.2vw, 50px) clamp(30px, 5vh, 50px);
   border-radius: 18px; border: 1px solid rgba(255,255,255,.09);
   background: linear-gradient(160deg, rgba(26,26,31,.85), rgba(12,12,15,.85));
@@ -234,21 +229,21 @@ html, body { margin: 0; padding: 0; background: #070709; }
   box-shadow: 0 40px 90px -30px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.05);
   animation: kz-rise 1s cubic-bezier(.2,.8,.2,1) .2s both;
 }
-.kz-mobile-brand { display: none; margin-bottom: 26px; }
 
 .kz-title { margin: 0 0 10px; font: 800 clamp(30px, 2.6vw, 42px)/1.1 'Montserrat', sans-serif; letter-spacing: -.01em; color: #fff; }
 .kz-title span { color: var(--red-hot); }
 .kz-sub { margin: 0 0 clamp(24px, 4vh, 34px); font-size: 16px; color: #c9c9d2; }
 
 /* ---------- LoginForm overrides ---------- */
+.kz-form form, .kz-form .row, .kz-form [class*="col"] { width: 100%; max-width: 100%; margin-left: 0; margin-right: 0; padding-left: 0; padding-right: 0; }
 .kz-form label, .kz-form .form-label { color: var(--muted); font-size: 12.5px; font-weight: 500; margin-bottom: 6px; }
 .kz-form .mb-3 { margin-bottom: 20px !important; }
 .kz-form .form-control,
 .kz-form input[type="text"], .kz-form input[type="email"], .kz-form input[type="password"] {
-  width: 100%; box-sizing: border-box; height: 60px;
+  width: 100%; height: 60px;
   background-color: rgba(255,255,255,.025) !important; color: #fff !important;
   border: 1px solid var(--line) !important; border-radius: 10px !important;
-  padding: 0 18px 0 56px !important; font-size: 15.5px;
+  padding: 0 18px 0 56px !important; font-size: 16px;
   background-repeat: no-repeat !important; background-position: 20px center !important; background-size: 22px 22px !important;
   transition: border-color .2s, box-shadow .2s, background-color .2s;
 }
@@ -285,26 +280,101 @@ html, body { margin: 0; padding: 0; background: #070709; }
 /* OR + links */
 .kz-or { display: flex; align-items: center; gap: 22px; margin: clamp(22px, 4vh, 34px) 0 clamp(18px, 3vh, 26px); color: #c9c9d2; font-size: 14px; font-weight: 600; }
 .kz-or::before, .kz-or::after { content: ""; flex: 1; height: 1px; background: rgba(255,255,255,.18); }
-.kz-links { display: flex; justify-content: space-between; font-size: 15px; }
+.kz-links { display: flex; justify-content: space-between; gap: 12px; font-size: 15px; }
 .kz-links a { text-decoration: none; transition: color .2s; }
 .kz-links .forgot { color: var(--red-hot); font-weight: 500; }
 .kz-links .forgot:hover { color: #ff6b78; }
 .kz-links .help { color: #c9c9d2; }
 .kz-links .help:hover { color: #fff; }
 
-.kz-copy { position: relative; z-index: 2; margin: 22px 0 0; font-size: 12px; color: #6e6e79; }
+.kz-copy { position: relative; z-index: 2; margin: 22px 0 0; font-size: 12px; color: #6e6e79; text-align: center; }
 
-/* ================= Responsive ================= */
+/* ================= TABLET + MOBILE (one screen, no scroll) ================= */
 @media (max-width: 991px) {
-  .kz-auth { grid-template-columns: 1fr; }
-  .kz-hero { display: none; }
-  .kz-mobile-brand { display: block; }
-  .kz-panel { border-left: 0; }
-}
-@media (max-width: 480px) {
-  .kz-card { padding: 28px 20px; }
+  html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+
+  .kz-auth {
+    display: flex; flex-direction: column;
+    height: 100vh; height: 100dvh;
+    overflow: hidden; overscroll-behavior: none;
+  }
+
+  /* Hero = short header with the photo */
+  .kz-hero { flex: 0 0 auto; min-height: 0; }
+  .kz-hero-inner {
+    min-height: 0; height: auto; justify-content: flex-start;
+    padding: calc(clamp(18px, 4vh, 36px) + env(safe-area-inset-top)) 16px clamp(40px, 7vh, 60px);
+  }
+  .kz-shade { --shade: .7; }
+  .kz-neon { top: 22%; width: 30%; height: 4px; }
+  .kz-features { display: none; }
+  .kz-stripe.bl1, .kz-stripe.bl2 { display: none; }
+
+  .kz-logo-img { width: clamp(52px, 9vh, 76px); height: clamp(52px, 9vh, 76px); border-radius: 14px; }
+  .kz-wordmark { margin-top: 10px; }
+  .kz-wordmark .w1 { font-size: clamp(24px, 6.5vw, 36px); }
+  .kz-wordmark .w2 { font-size: clamp(17px, 4.6vw, 24px); }
+  .kz-tagline { margin-top: 10px; font-size: 10px; letter-spacing: .2em; gap: 10px; }
+
+  /* Panel fills the rest of the screen, edge to edge */
+  .kz-panel {
+    flex: 1 1 auto; min-height: 0;
+    justify-content: flex-start; align-items: stretch;
+    padding: 0; border-left: 0; overflow: visible;
+    background: #111115;
+  }
+  .kz-glow, .kz-stripe.br1, .kz-stripe.br2 { display: none; }
+
+  /* Card = full width bottom sheet */
+  .kz-card {
+    flex: 1 1 auto; min-height: 0;
+    width: 100%; max-width: none; margin: -26px 0 0;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: clamp(20px, 3.5vh, 32px) 20px 12px;
+    border-radius: 24px 24px 0 0;
+    border: 0; border-top: 1px solid rgba(255,255,255,.09);
+    background: #111115;
+    backdrop-filter: none; -webkit-backdrop-filter: none;
+    box-shadow: 0 -18px 40px -10px rgba(0,0,0,.8);
+  }
+  .kz-form { width: 100%; max-width: 520px; margin: 0 auto; }
+  .kz-or, .kz-links { width: 100%; max-width: 520px; margin-left: auto; margin-right: auto; }
+  .kz-title, .kz-sub { display: none; }
+
+  .kz-form .form-control,
+  .kz-form input[type="text"], .kz-form input[type="email"], .kz-form input[type="password"] {
+    height: 52px; padding-left: 50px !important; background-position: 16px center !important; background-size: 20px 20px !important;
+  }
+  .kz-form .mb-3 { margin-bottom: 14px !important; }
+  .kz-form .btn-primary, .kz-form button[type="submit"] { height: 52px; font-size: 16px; }
+  .kz-or { margin: clamp(14px, 2.5vh, 22px) auto clamp(12px, 2vh, 18px); }
   .kz-links { font-size: 14px; }
+
+  .kz-copy { margin: 0; padding: 8px 16px calc(10px + env(safe-area-inset-bottom)); font-size: 11px; }
 }
+
+/* Short phones (height) — compress so everything still fits */
+@media (max-width: 991px) and (max-height: 700px) {
+  .kz-tagline { display: none; }
+  .kz-hero-inner { padding-bottom: 38px; }
+  .kz-form .form-control,
+  .kz-form input[type="text"], .kz-form input[type="email"], .kz-form input[type="password"] { height: 46px; }
+  .kz-form .btn-primary, .kz-form button[type="submit"] { height: 48px; }
+  .kz-form .mb-3 { margin-bottom: 10px !important; }
+  .kz-form label, .kz-form .form-label { margin-bottom: 4px; }
+}
+@media (max-width: 991px) and (max-height: 580px) {
+  .kz-logo-img { display: none; }
+  .kz-wordmark { margin-top: 0; }
+  .kz-or { display: none; }
+  .kz-links { margin-top: 14px; }
+  .kz-copy { display: none; }
+}
+
+@media (max-width: 360px) {
+  .kz-card { padding-left: 14px; padding-right: 14px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .kz-auth *, .kz-auth *::before, .kz-auth *::after { animation: none !important; transition: none !important; }
 }
