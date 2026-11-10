@@ -59,7 +59,7 @@ function ItemSearch({ onAdd, disabled }) {
       </div>
       {typed && (
         <div className="border rounded-3 mt-1 bg-white overflow-hidden shadow-sm" style={{ maxHeight: 300, overflowY: "auto" }}>
-          {!isFetching && data.length === 0 && <div className="small text-muted p-3">No spare part found for "{dq}". Add it to the Item master (Inventory &amp; Spare Parts), or add it manually below.</div>}
+          {!isFetching && data.length === 0 && <div className="small text-muted p-3">No spare part found for &apos;{dq}&apos;. Add it to the Item master (Inventory &amp; Spare Parts), or add it manually below.</div>}
           {data.map((p) => (
             <button key={p.id} type="button" disabled={disabled} onClick={() => pick(p)} className={`d-flex align-items-center gap-2 w-100 text-start border-0 border-bottom px-3 py-2 ${added === p.id ? "bg-success-subtle" : "bg-white"}`}>
               <div className="flex-grow-1">
@@ -86,7 +86,8 @@ function ItemSearch({ onAdd, disabled }) {
 
 // One collapsible section: coloured icon, title, a short summary and a done tick. Click the header to open / close.
 // A card without children (the Total card) is just a header.
-function Card({ title, hint, right, children, icon = "mdi:clipboard-text-outline", color = "#2563eb", summary, done, defaultOpen = true }) {
+function Card({ title, hint, right, children, icon = "mdi:clipboard-text-outline", color: _sectionColor, summary, done, defaultOpen = true }) {
+  const color = "#c8102e"; // one theme colour for every section (black + red)
   const [open, setOpen] = useState(defaultOpen);
   const hasBody = children !== undefined && children !== null;
   return (
@@ -319,29 +320,49 @@ var im=document.images[0];if(!im||im.complete){setTimeout(go,150)}else{im.onload
   const prev = data?.previous;
   return (
     <>
-      <Modal show onHide={tryClose} size="xl" centered scrollable fullscreen="lg-down" backdrop="static" enforceFocus={false}>
-        <Modal.Header closeButton className="border-0 pb-0">
-          <Modal.Title className="fs-5 d-flex align-items-center gap-3">
-            <span className="d-inline-flex align-items-center justify-content-center rounded-3 text-white" style={{ width: 44, height: 44, background: "#ea580c" }}>
-              <Icon icon="mdi:cog-transfer-outline" width="26" height="26" />
-            </span>
+      <Modal show onHide={tryClose} size="xl" centered scrollable fullscreen="lg-down" backdrop="static" enforceFocus={false} dialogClassName="sp-modal">
+        <style>{`
+          @media (min-width: 992px) { .modal-dialog.sp-modal { --bs-modal-width: 1060px; } }
+          .sp-modal .modal-content { border: 0; border-radius: 18px; overflow: hidden; box-shadow: 0 24px 60px -18px rgba(0,0,0,.6); }
+          .sp-modal .sp-head { background: linear-gradient(135deg,#0a0a0a 0%,#7a0a14 55%,#c8102e 100%); color: #fff; border: 0; padding: 16px 22px; }
+          .sp-modal .modal-body { background: #f6f6f7 !important; padding: 18px 22px; }
+          .sp-modal .form-control, .sp-modal .form-select { border-radius: 12px; border: 1.5px solid #c4c4ca; min-height: 44px; }
+          .sp-modal .form-control:focus, .sp-modal .form-select:focus { border-color: #c8102e; box-shadow: 0 0 0 4px rgba(200,16,46,.15); }
+          .sp-modal .input-group > .form-control { border-radius: 0 12px 12px 0; min-height: 52px; }
+          .sp-modal .input-group > .input-group-text:first-child { border-radius: 12px 0 0 12px; background: #fde8ea !important; color: #c8102e; border: 1.5px solid #c4c4ca; border-right: 0; }
+          .sp-modal .form-check-input:checked { background-color: #c8102e; border-color: #c8102e; }
+          .sp-modal .btn-outline-primary, .sp-modal .btn-outline-secondary { color: #111; border: 1.5px solid #c4c4ca; border-radius: 10px; font-weight: 600; background: #fff; }
+          .sp-modal .btn-outline-primary:hover, .sp-modal .btn-outline-secondary:hover { color: #fff; background: #111; border-color: #111; }
+          .sp-modal .btn-outline-danger { border-radius: 10px; border-width: 1.5px; }
+          .sp-modal .btn-secondary { background: #111; border-color: #111; border-radius: 10px; }
+          .sp-modal .btn-success, .sp-modal .btn-primary { color: #fff !important; border: 0 !important; border-radius: 10px; font-weight: 700; background: linear-gradient(135deg,#000000 0%,#1c1c1c 50%,#3d3d3d 100%); box-shadow: inset 0 -3px 0 #c8102e; }
+          .sp-modal .btn-success:hover, .sp-modal .btn-primary:hover { filter: brightness(1.25); }
+          .sp-modal .modal-footer { background: #f6f6f7; border-top: 1px solid #e3e3e6; padding: 12px 22px; }
+          .sp-modal .modal-footer .btn { min-height: 46px; padding: 0 22px; border-radius: 12px; }
+          .sp-modal table thead th { background: #111; color: #fff; font-size: .72rem; letter-spacing: .05em; text-transform: uppercase; border: 0; }
+          .sp-modal .sp-jobno { display: inline-block; background: #111; color: #fff; border-radius: 8px; padding: 3px 10px; font-weight: 700; font-size: .85rem; box-shadow: inset 3px 0 0 #c8102e; }
+          .sp-modal .sp-plate { display: inline-flex; background: #facc15; color: #111; border: 1.5px solid #111; border-radius: 6px; padding: 1px 9px; font-weight: 800; font-size: .82rem; letter-spacing: .05em; }
+        `}</style>
+        <Modal.Header closeButton closeVariant="white" className="sp-head">
+          <Modal.Title className="fs-5 d-flex align-items-center gap-3 text-white">
+            <Icon icon="mdi:cog-transfer-outline" width="30" height="30" />
             <span>
-              Spare Part Review &amp; Order{job && <span className="text-muted fw-normal">{` / ${job.departmentName} Department`}</span>}
+              Spare Part Review &amp; Order{job && <span className="fw-normal" style={{ color: "rgba(255,255,255,.75)" }}>{` / ${job.departmentName} Department`}</span>}
             </span>
           </Modal.Title>
         </Modal.Header>
-        <Modal.Body style={{ backgroundColor: "#f1f5f9" }}>
+        <Modal.Body style={{ backgroundColor: "#f6f6f7" }}>
           {isLoading && <div className="text-center py-5"><Spinner /></div>}
           {isError && <Alert variant="danger" className="d-flex justify-content-between"><span>{loadError?.data?.message || "Could not load the spare parts."}</span><Button size="sm" variant="outline-danger" onClick={refetch}>Try again</Button></Alert>}
           {data && (
             <>
-              <div className="d-flex flex-wrap align-items-center gap-2 mb-3 p-2 px-3 bg-white rounded-3" style={{ border: "1px solid #e2e8f0", boxShadow: "0 1px 4px rgba(15,23,42,.07)" }}>
-                <span className="fw-bold"><Icon icon="mdi:briefcase-outline" width="18" height="18" className="me-1 text-muted" />{job.jobNo}</span>
-                <span><Icon icon="mdi:car-outline" width="18" height="18" className="me-1 text-muted" />{job.regNo}</span>
-                <span className="text-muted"><Icon icon="mdi:account-outline" width="18" height="18" className="me-1" />{job.customerName}</span>
+              <div className="d-flex flex-wrap align-items-center gap-2 mb-3 p-2 px-3 bg-white rounded-3" style={{ border: "1px solid #e3e3e6", borderLeft: "5px solid #c8102e", boxShadow: "0 4px 14px -10px rgba(15,23,42,.45)" }}>
+                <span className="sp-jobno">{job.jobNo}</span>
+                <span className="sp-plate">{job.regNo}</span>
+                <span className="fw-semibold"><Icon icon="mdi:account-outline" width="18" height="18" className="me-1" style={{ color: "#c8102e" }} />{job.customerName}</span>
                 <span className="ms-auto d-flex flex-wrap gap-2">
                   <Badge bg="light" text="dark" className="border fw-normal">{data.items.length} spare part(s)</Badge>
-                  <Badge bg="success-subtle" text="success-emphasis" className="fw-semibold">{money(data.totalSparePartsValue)}</Badge>
+                  <Badge bg="dark" className="fw-semibold">{money(data.totalSparePartsValue)}</Badge>
                   {done && <Badge bg="success">Completed</Badge>}
                 </span>
               </div>
@@ -376,7 +397,7 @@ var im=document.images[0];if(!im||im.complete){setTimeout(go,150)}else{im.onload
                       </Button>
                     </div>
                     <ItemSearch onAdd={addFromCatalog} disabled={adding} />
-                    <div className="small text-muted mt-n2">Search the item master and click an item to add it. Can't find it? Use "Add item manually".</div>
+                    <div className="small text-muted mt-n2">Search the item master and click an item to add it. Can&apos;t find it? Use &apos;Add item manually&apos;.</div>
                   </div>
                 )}
                 <Table size="sm" responsive className="align-middle mb-2">
@@ -467,7 +488,7 @@ var im=document.images[0];if(!im||im.complete){setTimeout(go,150)}else{im.onload
           )}
         </Modal.Body>
         <Modal.Footer>
-          <Button variant="outline-secondary" onClick={tryClose}>Close</Button>
+          <Button variant="light" onClick={tryClose} style={{ border: "1.5px solid #c4c4ca", color: "#111", fontWeight: 600 }}>Close</Button>
           {data && !readOnly && <Button variant="success" disabled={completing} onClick={finish}>{completing ? <Spinner size="sm" /> : <Icon icon="mdi:check-circle-outline" width="18" height="18" />} Complete stage</Button>}
         </Modal.Footer>
       </Modal>

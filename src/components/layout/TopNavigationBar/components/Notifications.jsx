@@ -8,6 +8,8 @@ import { useRouter } from 'next/navigation'
 import { io } from 'socket.io-client'
 import { useGetAdminNotificationsQuery, useGetAdminUnreadCountQuery, useMarkNotificationsReadMutation } from '@/store/features/apiSlice'
 import ReactDOM from 'react-dom'
+import { useGetMyNotificationsQuery, useMarkMyNotificationsReadMutation } from '@/app/(admin)/crm/components/pushApi' // CHANGE the path to where your crm/components folder is
+import usePushDevice from '@/app/(admin)/crm/components/usePushDevice' // same folder as pushApi
 
 const moduleIcons = {
   'Order Management': 'mdi:package-variant-closed',
@@ -16,6 +18,7 @@ const moduleIcons = {
   'Invoice Management': 'mdi:file-document-outline',
   'Product & Catalog Updates': 'mdi:shopping',
   'User & Client Management': 'mdi:account-group',
+  'My Jobs': 'mdi:car-wrench',
 }
 
 const moduleRoutes = {
@@ -43,8 +46,23 @@ const Notifications = () => {
   const { data, isLoading, isFetching, refetch } = useGetAdminNotificationsQuery({ page, limit: 10 })
   const { data: unreadData, refetch: refetchUnread } = useGetAdminUnreadCountQuery(null)
   const [markAsReadMutation] = useMarkNotificationsReadMutation()
-  
-  const unreadCount = unreadData?.unreadCount ?? 0
+
+  // Notifications for me (new job assigned etc.), saved by the backend together with the push
+  const { data: mineData, refetch: refetchMine } = useGetMyNotificationsQuery(undefined, { pollingInterval: 30000 })
+  const [markMineRead] = useMarkMyNotificationsReadMutation()
+
+  // Push alerts for this device (on / off) - controlled from inside this dropdown
+  const push = usePushDevice()
+
+  const unreadCount = (unreadData?.unreadCount ?? 0) + (mineData?.unread ?? 0)
+
+  // A push arrived while the app is open: refresh the list straight away
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
+    const onMsg = (e) => { if (e.data?.type === 'PUSH_RECEIVED') refetchMine() }
+    navigator.serviceWorker.addEventListener('message', onMsg)
+    return () => navigator.serviceWorker.removeEventListener('message', onMsg)
+  }, [refetchMine])
 
   useEffect(() => {
     audioRef.current = new Audio('/sound/success.mp3')
@@ -129,6 +147,15 @@ const Notifications = () => {
   }, [data, isFetching])
 
 const markNotificationClickAsRead = async (notif) => {
+    // my notification (job assigned): mark read and open the page saved with it
+    if (notif._mine) {
+      if (notif.status === 'Unread') {
+        try { await markMineRead({ ids: [notif._id] }).unwrap(); refetchMine() } catch (err) { console.error(err) }
+      }
+      setIsRedirecting(true)
+      setTimeout(() => { router.push(notif._url || '/'); setIsRedirecting(false) }, 400)
+      return
+    }
     if (notif.status === 'Unread') {
       try {
         await markAsReadMutation({ notification_ids: [Number(notif.notification_id)], is_viewed: true })
@@ -158,9 +185,34 @@ const markNotificationClickAsRead = async (notif) => {
   }
 
   // Unified List Logic: Flatten the object into a single array and sort by date
-  const flattenedNotifications = Object.values(allNotifications)
-    .flat()
+  const mineNotifications = (mineData?.items || []).map((n) => ({
+    notification_id: `my-${n.id}`,
+    _mine: true,
+    _id: n.id,
+    _url: n.url,
+    status: n.isRead ? 'Read' : 'Unread',
+    created_at: n.createdAt,
+    event_type: n.title,
+    message_template: n.body,
+    module: 'My Jobs',
+  }))
+
+  const flattenedNotifications = [...Object.values(allNotifications).flat(), ...mineNotifications]
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  // Mark everything as read (my notifications + the admin ones that are loaded)
+  const markAllRead = async (e) => {
+    e.stopPropagation()
+    try {
+      const adminIds = flattenedNotifications.filter((n) => !n._mine && n.status === 'Unread').map((n) => Number(n.notification_id))
+      await Promise.all([
+        (mineData?.unread ?? 0) > 0 ? markMineRead({ all: true }).unwrap() : null,
+        adminIds.length ? markAsReadMutation({ notification_ids: adminIds, is_viewed: true }) : null,
+      ])
+      refetchMine()
+      refetchUnread()
+    } catch (err) { console.error(err) }
+  }
 
   return (
     <Dropdown show={dropdownOpen} onToggle={(isOpen) => setDropdownOpen(isOpen)} className="topbar-item">
@@ -174,9 +226,29 @@ const markNotificationClickAsRead = async (notif) => {
           <h5 className="m-0 d-flex justify-content-between align-items-center">
             Notifications
             <div className="d-flex align-items-center">
+              {['on', 'off', 'denied'].includes(push.state) && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); push.toggle() }}
+                  disabled={push.busy}
+                  className="btn btn-sm btn-link p-0 me-3"
+                  style={{ color: push.state === 'on' ? '#16a34a' : push.state === 'denied' ? '#dc2626' : '#6c757d' }}
+                  title={
+                    push.state === 'on' ? 'Job alerts ON for this device (click to turn off)'
+                    : push.state === 'denied' ? 'Blocked in browser settings: lock icon > Notifications > Allow'
+                    : 'Turn on job alerts for this device'
+                  }
+                >
+                  <IconifyIcon icon={push.state === 'on' ? 'mdi:cellphone-message' : 'mdi:cellphone-off'} className="fs-4" />
+                </button>
+              )}
               <button onClick={toggleMute} className="btn btn-sm btn-link p-0 me-3 text-secondary">
                 <IconifyIcon icon={isMuted ? "mdi:volume-off" : "mdi:volume-high"} className="fs-4" />
               </button>
+              {unreadCount > 0 && (
+                <button onClick={markAllRead} className="btn btn-sm btn-link p-0 me-3 text-primary" style={{ fontSize: '12px', textDecoration: 'none' }}>
+                  Mark all read
+                </button>
+              )}
               {unreadCount > 0 && <Badge bg="primary" pill>{unreadCount}</Badge>}
             </div>
           </h5>

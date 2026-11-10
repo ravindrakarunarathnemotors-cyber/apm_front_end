@@ -28,11 +28,19 @@ const toWaNumber = (raw) => {
   return d.startsWith("0") ? `94${d.slice(1)}` : d;
 };
 
-function Card({ title, icon, color, summary, done, right, children }) {
-  const [open, setOpen] = useState(true);
+// estimate time is saved as decimal hours (1.5 = 1 hr 30 min)
+const fmtTime = (hours, days) => {
+  const t = Number(hours) || 0; let h = Math.floor(t + 1e-6); let m = Math.round((t - h) * 60); if (m >= 60) { h += 1; m = 0; }
+  const d = Number(days) || 0;
+  return [d > 0 ? `${d} Day${d === 1 ? "" : "s"}` : "", h > 0 ? `${h} Hrs` : "", m > 0 ? `${m} Min` : ""].filter(Boolean).join(" ");
+};
+
+function Card({ title, icon, color: _sectionColor, summary, done, right, children, className = "mb-3", defaultOpen = true }) {
+  const color = "#c8102e"; // one theme colour for every section (black + red)
+  const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="bg-white rounded-3 mb-3" style={{ border: "1px solid #e2e8f0", boxShadow: "0 1px 4px rgba(15,23,42,.07)", borderLeft: `4px solid ${color}` }}>
-      <div className="d-flex flex-wrap align-items-center gap-2 p-2 px-3" role="button" aria-expanded={open} onClick={() => setOpen(!open)}
+    <div className={`bg-white rounded-3 ${className}`} style={{ border: "1px solid #e2e8f0", boxShadow: "0 1px 4px rgba(15,23,42,.07)", borderLeft: `4px solid ${color}` }}>
+      <div className="d-flex flex-wrap align-items-center gap-2 py-1 px-3" role="button" aria-expanded={open} onClick={() => setOpen(!open)}
         style={{ background: open ? `color-mix(in srgb, ${color} 7%, white)` : "#fff", borderRadius: open ? "0.45rem 0.45rem 0 0" : "0.45rem" }}>
         <span className="d-inline-flex align-items-center justify-content-center rounded-circle flex-shrink-0" style={{ width: 36, height: 36, color, background: `color-mix(in srgb, ${color} 14%, white)` }}>
           <Icon icon={icon} width="20" height="20" />
@@ -44,7 +52,7 @@ function Card({ title, icon, color, summary, done, right, children }) {
         {right && <div onClick={(e) => e.stopPropagation()}>{right}</div>}
         <Icon icon={open ? "mdi:chevron-up" : "mdi:chevron-down"} width="22" height="22" className="text-muted flex-shrink-0" />
       </div>
-      <Collapse in={open}><div><div className="p-3 border-top">{children}</div></div></Collapse>
+      <Collapse in={open}><div><div className="p-2 px-3 border-top">{children}</div></div></Collapse>
     </div>
   );
 }
@@ -52,8 +60,8 @@ function Card({ title, icon, color, summary, done, right, children }) {
 // One tick row (big tap target)
 function Row({ n, label, checked, onChange, disabled, onRemove }) {
   return (
-    <label className={`d-flex align-items-center gap-3 border rounded-3 px-3 py-2 mb-2 w-100 ${checked ? "border-success bg-success-subtle" : "bg-white"}`} style={{ cursor: disabled ? "default" : "pointer" }}>
-      <Form.Check.Input type="checkbox" className="mt-0" style={{ width: 20, height: 20 }} checked={checked} disabled={disabled} onChange={onChange} />
+    <label className={`ii-row d-flex align-items-center gap-3 border rounded-3 px-2 py-1 w-100 h-100 ${checked ? "on" : "bg-white"}`} style={{ cursor: disabled ? "default" : "pointer", minHeight: 40 }}>
+      <Form.Check.Input type="checkbox" className="mt-0 flex-shrink-0" style={{ width: 20, height: 20 }} checked={checked} disabled={disabled} onChange={onChange} />
       <span className="text-muted">{letter(n)}.</span>
       <span className="flex-grow-1">{label}</span>
       {onRemove && !disabled && <button type="button" className="btn btn-sm btn-outline-danger" onClick={(e) => { e.preventDefault(); onRemove(); }}><Icon icon="mdi:delete-outline" width="16" height="16" /></button>}
@@ -71,7 +79,8 @@ export default function InternalInspectionModal({ jobId, onHide, onSaved }) {
   const [extras, setExtras] = useState([]);          // [{ section, label, checked }]
   const [notes, setNotes] = useState("");
   const [drafts, setDrafts] = useState({});          // new "more option" text per section
-  const [error, setError] = useState("");
+  const [error, setErrorState] = useState("");
+  const setError = (m) => { setErrorState(m); if (m) Swal.fire({ title: "Please check", text: m, icon: "error", confirmButtonText: "OK", confirmButtonColor: "#111" }); };
   const snapRef = useRef("");
 
   const job = data?.job;
@@ -166,41 +175,45 @@ export default function InternalInspectionModal({ jobId, onHide, onSaved }) {
     const ap = data.approval;
     return (
       <>
-        <div className="bg-white rounded-3 p-3 mb-3" style={{ border: "1px solid #e2e8f0" }}>
+        <div className="bg-white rounded-3 p-2 px-3 mb-2" style={{ border: "1px solid #e3e3e6", borderLeft: "5px solid #c8102e", boxShadow: "0 4px 14px -10px rgba(15,23,42,.45)" }}>
           <div className="d-flex flex-wrap gap-4 align-items-center">
-            <div><div className="small text-muted">Job</div><div className="fw-bold">{job.jobNo}</div></div>
-            <div><div className="small text-muted">Vehicle</div><div className="fw-bold">{job.regNo}</div></div>
+            <div><div className="small text-muted">Job</div><span className="ii-jobno">{job.jobNo}</span></div>
+            <div><div className="small text-muted">Vehicle</div><span className="ii-plate">{job.regNo}</span></div>
             <div><div className="small text-muted">Customer</div><div className="fw-bold">{job.customerName}</div></div>
             <div className="ms-auto text-end" style={{ minWidth: 160 }}>
               <div className="small text-muted">{done} / {total} confirmed</div>
-              <ProgressBar now={total ? (done / total) * 100 : 0} variant="success" style={{ height: 8 }} />
+              <ProgressBar now={total ? (done / total) * 100 : 0} className="ii-prog" style={{ height: 10 }} />
             </div>
           </div>
         </div>
         {readOnly && <Alert variant="info" className="py-2">{data.header.completedAt ? "This stage is completed. The checklist is read only." : "This job has not reached this stage yet."}</Alert>}
 
+        <div className="row g-2 mb-2">
         {data.sections.map((s) => {
           const ui = SECTION_UI[s.key] || { icon: "mdi:clipboard-text-outline", color: "#2563eb" };
           const extra = extras.map((e, i) => ({ ...e, i })).filter((e) => e.section === s.key);
           const count = s.items.filter((i) => checked.includes(i.id)).length + extra.filter((e) => e.checked).length;
           const all = s.items.length + extra.length;
           return (
-            <Card key={s.key} title={s.title} icon={ui.icon} color={ui.color} summary={`${count} / ${all} confirmed`} done={all > 0 && count === all}
+            <div key={s.key} className="col-12">
+            <Card className="mb-0" defaultOpen={false} title={s.title} icon={ui.icon} color={ui.color} summary={`${count} / ${all} confirmed`} done={all > 0 && count === all}
               right={!readOnly && s.items.length > 0 && <Button size="sm" variant="outline-secondary" onClick={() => selectAll(s)}>{s.items.every((i) => checked.includes(i.id)) ? "Clear all" : "Confirm all"}</Button>}>
               {s.key === "PRE_REPAIR" && ap && (
-                <div className="rounded-3 p-2 px-3 mb-3 small" style={{ background: "#f8fafc", border: "1px dashed #cbd5e1" }}>
+                <div className="rounded-3 p-2 px-3 mb-3 small" style={{ background: "#fff1f2", border: "1px dashed #c8102e" }}>
                   <div className="fw-semibold mb-1">From Customer Approval</div>
-                  <div>Estimated time: <b>{[ap.estHours ? `${ap.estHours} Hrs` : "", ap.estDays ? `${ap.estDays} Days` : ""].filter(Boolean).join(" / ") || "-"}</b></div>
+                  <div>Estimated time: <b>{fmtTime(ap.estHours, ap.estDays) || "-"}</b></div>
                   <div>Confirmation: <b>{ap.decision === "TOTAL" ? "Total approved" : ap.decision === "PARTIAL" ? "Agreed scope only" : "-"}</b></div>
                   {ap.decision === "PARTIAL" && ap.agreedScope?.length > 0 && <ul className="mb-0 ps-3">{ap.agreedScope.map((x, n) => <li key={n}>{x}</li>)}</ul>}
                   {ap.extraNote && <div>Extra note: {ap.extraNote}</div>}
                 </div>
               )}
-              {s.items.map((i, n) => <Row key={i.id} n={n} label={i.label} checked={checked.includes(i.id)} disabled={readOnly} onChange={() => toggleItem(i.id)} />)}
-              {extra.map((e, n) => (
-                <Row key={`x${e.i}`} n={s.items.length + n} label={<>{e.label} <span className="badge text-bg-light border ms-1">added</span></>} checked={e.checked} disabled={readOnly}
-                  onChange={() => toggleExtra(e.i)} onRemove={() => setExtras((x) => x.filter((_, k) => k !== e.i))} />
-              ))}
+              <div className="row g-1 mb-1 row-cols-1">
+                {s.items.map((i, n) => <div className="col" key={i.id}><Row n={n} label={i.label} checked={checked.includes(i.id)} disabled={readOnly} onChange={() => toggleItem(i.id)} /></div>)}
+                {extra.map((e, n) => (
+                  <div className="col" key={`x${e.i}`}><Row n={s.items.length + n} label={<>{e.label} <span className="badge text-bg-light border ms-1">added</span></>} checked={e.checked} disabled={readOnly}
+                    onChange={() => toggleExtra(e.i)} onRemove={() => setExtras((x) => x.filter((_, k) => k !== e.i))} /></div>
+                ))}
+              </div>
               {!readOnly && (
                 <div className="d-flex gap-2 mt-1">
                   <FormControl size="sm" maxLength={200} placeholder="Add another option" value={drafts[s.key] || ""} onChange={(e) => setDrafts({ ...drafts, [s.key]: e.target.value })} onKeyDown={(e) => e.key === "Enter" && addExtra(s.key)} />
@@ -209,7 +222,7 @@ export default function InternalInspectionModal({ jobId, onHide, onSaved }) {
               )}
 
               {s.key === "SPARE_PARTS" && (
-                <div className="border rounded-3 p-3 mt-3" style={{ background: "#fffaf5" }}>
+                <div className="border rounded-3 p-3 mt-3" style={{ background: "#fafafa" }}>
                   <div className="small mb-2">
                     Spare parts provided by: <b>{ap?.partsBy === "CLIENT" ? "the customer" : ap?.partsBy === "COMPANY" ? "the company" : "-"}</b>
                     {data.parts.length > 0 && <> · {data.parts.length} part(s) in the list</>}
@@ -234,11 +247,13 @@ export default function InternalInspectionModal({ jobId, onHide, onSaved }) {
                 </div>
               )}
             </Card>
+            </div>
           );
         })}
+        </div>
 
-        <Card title="Notes" icon="mdi:note-text-outline" color="#64748b" summary="Optional">
-          <FormControl as="textarea" rows={2} maxLength={1000} disabled={readOnly} value={notes} onChange={(e) => setNotes(e.target.value)} />
+        <Card className="mb-2" defaultOpen={false} title="Notes" icon="mdi:note-text-outline" color="#64748b" summary="Optional">
+          <FormControl as="textarea" rows={1} maxLength={1000} disabled={readOnly} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Card>
         {error && <Alert variant="danger" className="py-2 mb-0">{error}</Alert>}
       </>
@@ -246,19 +261,43 @@ export default function InternalInspectionModal({ jobId, onHide, onSaved }) {
   };
 
   return (
-    <Modal show onHide={tryClose} size="xl" centered scrollable fullscreen="lg-down" backdrop="static" enforceFocus={false}>
-      <Modal.Header closeButton className="border-0 pb-0">
-        <Modal.Title className="fs-5 d-flex align-items-center gap-3">
-          <span className="d-inline-flex align-items-center justify-content-center rounded-3 text-white" style={{ width: 44, height: 44, background: "#2563eb" }}>
-            <Icon icon="mdi:clipboard-list-outline" width="26" height="26" />
-          </span>
-          <span>Internal Inspection - 1{job && <span className="text-muted fw-normal">{` / ${job.departmentName} Department`}</span>}</span>
+    <Modal show onHide={tryClose} size="xl" centered scrollable fullscreen="lg-down" backdrop="static" enforceFocus={false} dialogClassName="ii-modal">
+      <style>{`
+        @media (min-width: 992px) { .modal-dialog.ii-modal { --bs-modal-width: 1060px; } }
+        .ii-modal .modal-content { border: 0; border-radius: 18px; overflow: hidden; box-shadow: 0 24px 60px -18px rgba(0,0,0,.6); }
+        .ii-modal .ii-head { background: linear-gradient(135deg,#0a0a0a 0%,#7a0a14 55%,#c8102e 100%); color: #fff; border: 0; padding: 12px 20px; }
+        .ii-modal .modal-body { background: #f6f6f7 !important; padding: 14px 20px; }
+        .ii-modal .form-control, .ii-modal .form-select { border-radius: 12px; border: 1.5px solid #c4c4ca; min-height: 44px; }
+        .ii-modal textarea.form-control { min-height: 0; }
+        .ii-modal .form-control:focus, .ii-modal .form-select:focus { border-color: #c8102e; box-shadow: 0 0 0 4px rgba(200,16,46,.15); }
+        .ii-modal .form-check-input:checked { background-color: #16a34a; border-color: #16a34a; }
+        .ii-modal .form-check-input:focus { border-color: #16a34a; box-shadow: 0 0 0 4px rgba(22,163,74,.18); }
+        .ii-modal .ii-row { transition: background .15s, border-color .15s; }
+        .ii-modal .ii-row:hover { border-color: #c8102e !important; }
+        .ii-modal .ii-row.on { background: #e8f8ee; border-color: #16a34a !important; }
+        .ii-modal .ii-row.on .flex-grow-1 { font-weight: 600; }
+        .ii-modal .ii-prog { background: #e3e3e6; border-radius: 999px; }
+        .ii-modal .ii-prog .progress-bar { background: linear-gradient(135deg,#0a0a0a 0%,#7a0a14 55%,#c8102e 100%); }
+        .ii-modal .btn-outline-primary, .ii-modal .btn-outline-secondary { color: #111; border: 1.5px solid #c4c4ca; border-radius: 10px; font-weight: 600; background: #fff; }
+        .ii-modal .btn-outline-primary:hover, .ii-modal .btn-outline-secondary:hover { color: #fff; background: #111; border-color: #111; }
+        .ii-modal .btn-outline-danger { border-radius: 10px; border-width: 1.5px; }
+        .ii-modal .btn-success, .ii-modal .btn-primary { color: #fff !important; border: 0 !important; border-radius: 10px; font-weight: 700; background: linear-gradient(135deg,#000000 0%,#1c1c1c 50%,#3d3d3d 100%); box-shadow: inset 0 -3px 0 #c8102e; }
+        .ii-modal .btn-success:hover, .ii-modal .btn-primary:hover { filter: brightness(1.25); }
+        .ii-modal .modal-footer { background: #f6f6f7; border-top: 1px solid #e3e3e6; padding: 12px 22px; }
+        .ii-modal .modal-footer .btn { min-height: 46px; padding: 0 22px; border-radius: 12px; }
+        .ii-modal .ii-jobno { display: inline-block; background: #111; color: #fff; border-radius: 8px; padding: 3px 10px; font-weight: 700; font-size: .85rem; box-shadow: inset 3px 0 0 #c8102e; }
+        .ii-modal .ii-plate { display: inline-flex; background: #facc15; color: #111; border: 1.5px solid #111; border-radius: 6px; padding: 1px 9px; font-weight: 800; font-size: .82rem; letter-spacing: .05em; }
+      `}</style>
+      <Modal.Header closeButton closeVariant="white" className="ii-head">
+        <Modal.Title className="fs-5 d-flex align-items-center gap-3 text-white">
+          <Icon icon="mdi:clipboard-list-outline" width="30" height="30" />
+          <span>Internal Inspection - 1{job && <span className="fw-normal" style={{ color: "rgba(255,255,255,.75)" }}>{` / ${job.departmentName} Department`}</span>}</span>
         </Modal.Title>
       </Modal.Header>
-      <Modal.Body style={{ backgroundColor: "#f1f5f9" }}>{body()}</Modal.Body>
+      <Modal.Body style={{ backgroundColor: "#f6f6f7" }}>{body()}</Modal.Body>
       <Modal.Footer>
         <Button variant="outline-secondary" className="me-auto" disabled={isFetching} onClick={refetch}><Icon icon="mdi:refresh" width="16" height="16" /> Refresh</Button>
-        <Button variant="outline-secondary" onClick={tryClose}>Close</Button>
+        <Button variant="light" onClick={tryClose} style={{ border: "1.5px solid #c4c4ca", color: "#111", fontWeight: 600 }}>Close</Button>
         {data && !readOnly && checked && (
           <>
             <Button variant="outline-primary" disabled={saving || !dirty} onClick={saveClick}>{saving ? <Spinner size="sm" /> : <Icon icon="mdi:content-save-outline" width="18" height="18" />} Save</Button>

@@ -338,8 +338,17 @@ function TreeList({ list, query = "", color = "#2563eb" }) {
         </div>
       )}
       {blocks.map((b) => (
-        <ParentBlock key={`${b.key}-${b.name}-${b.option?.isActive}`} list={list} parent={b.name} parentOption={b.option} children={b.kids}
-          open={!!needle || openSet.has(b.key)} onToggle={() => toggle(b.key)} color={color} />
+        <ParentBlock 
+  key={`${b.key}-${b.name}-${b.option?.isActive}`} 
+  list={list} 
+  parent={b.name} 
+  parentOption={b.option}
+  open={!!needle || openSet.has(b.key)} 
+  onToggle={() => toggle(b.key)} 
+  color={color}
+>
+  {b.kids}
+</ParentBlock>
       ))}
       {blocks.length === 0 && (
         <div className="text-center text-muted py-4 bg-white border rounded-3">

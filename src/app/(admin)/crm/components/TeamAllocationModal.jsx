@@ -6,6 +6,7 @@ import { Icon } from "@iconify/react";
 import Swal from "sweetalert2";
 import { useGetEmployeesQuery, useGetJobTeamAllocationQuery, useSaveJobTeamAllocationMutation } from "@/store/features/apiSlice";
 import { getDepartmentUi } from "./departmentConfig";
+import { usePermissions } from "./permissionsApi"; // action permissions
 import ManageTeamsBaysModal from "./ManageTeamsBaysModal"; // opens on top of this window as its own popup
 
 // Stage 6 · Team Allocation  (every department)
@@ -17,6 +18,7 @@ export default function TeamAllocationModal({ jobId, onHide, onSaved }) {
   });
   const [save, { isLoading: saving }] = useSaveJobTeamAllocationMutation();
 
+  const { can } = usePermissions();
   const [managing, setManaging] = useState(false); // "Manage teams and bays" popup
   const [teamId, setTeamId] = useState("");
   const [bayId, setBayId] = useState("");
@@ -144,27 +146,58 @@ export default function TeamAllocationModal({ jobId, onHide, onSaved }) {
     }
   };
 
+  // Yes / No as two big buttons (easy to tap on a phone / tablet)
   const yesNo = (name, value, onChange, error) => (
     <div>
-      <div className="d-flex gap-3">
-        {[["yes", "Yes"], ["no", "No"]].map(([k, label]) => (
-          <Form.Check key={k} inline type="radio" id={`${name}-${k}`} name={name} label={label} checked={value === k} onChange={() => onChange(k)} disabled={!data?.canAllocate} />
-        ))}
+      <div className="d-flex gap-2">
+        {[["yes", "Yes", "mdi:check-circle-outline", "#16a34a"], ["no", "No", "mdi:close-circle-outline", "#c8102e"]].map(([k, label, icon, color]) => {
+          const on = value === k;
+          return (
+            <button key={k} type="button" id={`${name}-${k}`} disabled={!data?.canAllocate} onClick={() => onChange(k)}
+              className="d-inline-flex align-items-center justify-content-center gap-2 fw-bold"
+              style={{ minWidth: 120, minHeight: 48, borderRadius: 12, border: `2px solid ${on ? color : "#c4c4ca"}`, background: on ? `color-mix(in srgb, ${color} 10%, white)` : "#fff", color: on ? color : "#475569", opacity: data?.canAllocate ? 1 : 0.6 }}>
+              <Icon icon={icon} width="22" height="22" /> {label}
+            </button>
+          );
+        })}
       </div>
       {touched && error && <div className="text-danger small mt-1">{error}</div>}
     </div>
   );
 
+
   return (
     <>
     {/* enforceFocus is off while the Teams & Bays popup is open, so its inputs can be typed in */}
-    <Modal show onHide={saving ? undefined : close} size="lg" centered scrollable fullscreen="md-down" backdrop="static" enforceFocus={!managing}>
-      <Modal.Header closeButton={!saving}>
-        <Modal.Title className="fs-5 d-flex align-items-center gap-2">
-          <Icon icon="mdi:account-group-outline" width="24" height="24" color={ui.color} />
+    <style>{`
+      @media (min-width: 992px) { .modal-dialog.ta-modal { --bs-modal-width: 860px; } }
+      .ta-modal .modal-content { border: 0; border-radius: 18px; overflow: hidden; box-shadow: 0 24px 60px -18px rgba(0,0,0,.6); }
+      .ta-modal .ta-head { background: linear-gradient(135deg,#0a0a0a 0%,#7a0a14 55%,#c8102e 100%); color: #fff; border: 0; padding: 16px 22px; }
+      .ta-modal .modal-body { background: #f6f6f7; padding: 18px 22px; }
+      .ta-modal .modal-body .bg-white.border.rounded-3.p-3 { border-radius: 14px !important; border: 1px solid #e3e3e6 !important; border-left: 5px solid #c8102e !important; box-shadow: 0 4px 14px -10px rgba(15,23,42,.45); }
+      .ta-modal .form-select, .ta-modal .form-control { min-height: 48px; border-radius: 12px; border: 1.5px solid #c4c4ca; }
+      .ta-modal .form-select:focus, .ta-modal .form-control:focus { border-color: #c8102e; box-shadow: 0 0 0 4px rgba(200,16,46,.15); }
+      .ta-modal .form-check-input:checked { background-color: #c8102e; border-color: #c8102e; }
+      .ta-modal .form-check-input:focus { border-color: #c8102e; box-shadow: 0 0 0 4px rgba(200,16,46,.15); }
+      .ta-modal .btn-outline-primary { color: #111; border: 1.5px solid #111; border-radius: 10px; font-weight: 600; background: #fff; }
+      .ta-modal .btn-outline-primary:hover { color: #fff; background: #111; border-color: #111; }
+      .ta-modal .ta-main { color: #fff !important; border: 0 !important; border-radius: 12px; font-weight: 700; min-height: 46px; padding: 0 22px; background: linear-gradient(135deg,#000000 0%,#1c1c1c 50%,#3d3d3d 100%); box-shadow: inset 0 -3px 0 #c8102e, 0 8px 18px -8px rgba(0,0,0,.6); }
+      .ta-modal .ta-main:hover { filter: brightness(1.25); }
+      .ta-modal .ta-cancel { border-radius: 12px; min-height: 46px; padding: 0 20px; font-weight: 600; background: #fff; color: #111; border: 1.5px solid #c4c4ca; }
+      .ta-modal .modal-footer { background: #f6f6f7; border-top: 1px solid #e3e3e6; padding: 12px 22px; }
+      .ta-modal .ta-bay { border-radius: 12px !important; min-height: 54px; border: 2px solid #e2e8f0 !important; transition: all .15s; }
+      .ta-modal .ta-bay.on { border-color: #c8102e !important; background: #fff1f2 !important; }
+      .ta-modal .ta-bay:hover:not(.off) { border-color: #c8102e !important; }
+      .ta-modal .ta-jobno { display: inline-block; background: #111; color: #fff; border-radius: 8px; padding: 3px 10px; font-weight: 700; font-size: .85rem; box-shadow: inset 3px 0 0 #c8102e; }
+      .ta-modal .ta-plate { display: inline-flex; background: #facc15; color: #111; border: 1.5px solid #111; border-radius: 6px; padding: 1px 9px; font-weight: 800; font-size: .82rem; letter-spacing: .05em; }
+    `}</style>
+    <Modal show onHide={saving ? undefined : close} centered scrollable fullscreen="md-down" backdrop="static" enforceFocus={!managing} dialogClassName="ta-modal">
+      <Modal.Header closeButton={!saving} closeVariant="white" className="ta-head">
+        <Modal.Title className="fs-5 d-flex align-items-center gap-2 text-white">
+          <Icon icon="mdi:account-group-outline" width="28" height="28" />
           <span>
             Team Allocation
-            {job && <span className="text-muted fw-normal"> · {job.departmentName} Department</span>}
+            {job && <span className="fw-normal" style={{ color: "rgba(255,255,255,.75)" }}> · {job.departmentName} Department</span>}
           </span>
         </Modal.Title>
       </Modal.Header>
@@ -181,12 +214,15 @@ export default function TeamAllocationModal({ jobId, onHide, onSaved }) {
         {data && (
           <>
             <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-              <div className="small text-muted">
-                <strong className="text-dark">{job.jobNo}</strong> · {job.regNo}
+              <div className="d-flex align-items-center gap-2">
+                <span className="ta-jobno">{job.jobNo}</span>
+                <span className="ta-plate">{job.regNo}</span>
               </div>
-              <Button size="sm" variant="outline-primary" onClick={() => setManaging(true)}>
-                <Icon icon="mdi:cog-outline" width="18" height="18" /> Manage teams and bays
-              </Button>
+              {(can("team.manage") || can("bay.manage")) && (
+                <Button size="sm" variant="outline-primary" onClick={() => setManaging(true)}>
+                  <Icon icon="mdi:cog-outline" width="18" height="18" /> Manage teams and bays
+                </Button>
+              )}
             </div>
 
             {readOnly && <Alert variant="secondary" className="py-2">This job is not ready for team allocation yet.</Alert>}
@@ -230,7 +266,7 @@ export default function TeamAllocationModal({ jobId, onHide, onSaved }) {
                         <div key={b.id} className="col-6 col-md-3">
                         <label
                           htmlFor={`bay-${b.id}`}
-                          className={`d-flex align-items-center gap-2 border rounded-3 p-2 px-2 h-100 flex-wrap ${selected ? "border-primary bg-primary-subtle" : "bg-white"} ${disabled ? "opacity-50" : ""}`}
+                          className={`ta-bay d-flex align-items-center gap-2 p-2 px-2 h-100 flex-wrap ${selected ? "on" : "bg-white"} ${disabled ? "opacity-50 off" : ""}`}
                           style={{ cursor: disabled ? "not-allowed" : "pointer" }}
                         >
                           <Form.Check type="radio" id={`bay-${b.id}`} name="bay" checked={selected} disabled={disabled} onChange={() => onBayChange(String(b.id))} className="mb-0" />
@@ -273,9 +309,9 @@ export default function TeamAllocationModal({ jobId, onHide, onSaved }) {
       </Modal.Body>
 
       <Modal.Footer>
-        <Button variant="secondary" onClick={close} disabled={saving}>Cancel</Button>
+        <Button variant="light" className="ta-cancel" onClick={close} disabled={saving}>Cancel</Button>
         {data && !readOnly && (
-          <Button onClick={submit} disabled={saving}>
+          <Button className="ta-main" onClick={submit} disabled={saving}>
             <Icon icon="mdi:content-save-outline" width="20" height="20" />{" "}
             {saving ? "Saving..." : data.allocation ? "Update allocation" : "Save allocation"}
           </Button>

@@ -88,8 +88,8 @@ export default function StageThreeConsultant() {
                 className="d-flex align-items-center gap-3 h-100 rounded p-3"
                 style={{
                   cursor: "pointer",
-                  border: `2px solid ${isSelected ? "#2563eb" : "#e2e8f0"}`,
-                  backgroundColor: isSelected ? "color-mix(in srgb, #2563eb 8%, white)" : "#fff",
+                  border: `2px solid ${isSelected ? "#111111" : "#e2e8f0"}`,
+                  backgroundColor: isSelected ? "color-mix(in srgb, #111111 8%, white)" : "#fff",
                   transition: "all 0.2s ease",
                 }}
               >

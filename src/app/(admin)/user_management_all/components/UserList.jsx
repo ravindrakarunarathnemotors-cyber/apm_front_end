@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import ContainerCardOnly from "@/components/ContainerCardOnly";
+import UmCard from "./UmCard";
 import {
   Table,
   Pagination,
@@ -22,12 +22,22 @@ import Swal from "sweetalert2";
 import {
   useGetClientStaffQuery,
   useUpdateUserMutation,
-  useRefreshTokenMutation,
   useGetRolesMutation,
+  useGetBranchesMutation,
 } from "@/store/features/apiSlice";
 import useLogout from "@/hooks/useLogout";
+import useAuthRetry from "./authRetry";
 
 const USERS_PER_PAGE = 25;
+
+// 1 … 4 5 [6] 7 8 … 20   (all page numbers used to be shown, which overflows with many users)
+const pageWindow = (current, total) => {
+  const pages = new Set([1, total, current - 2, current - 1, current, current + 1, current + 2]);
+  const list = [...pages].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b);
+  const out = [];
+  list.forEach((p, i) => { if (i > 0 && p - list[i - 1] > 1) out.push("…"); out.push(p); });
+  return out;
+};
 
 const actionBtnStyle = {
   minWidth: "auto",
@@ -56,7 +66,10 @@ export default function UserList() {
     last_name: "",
     email: "",
     mobile: "",
+    nic: "",
   });
+  const [selectedBranch, setSelectedBranch] = useState("");
+  const [me, setMe] = useState({ id: null, isAdmin: false });   // the logged-in user (the server checks every action again)
   const [passwordFormValues, setPasswordFormValues] = useState({
     newPassword: "",
     confirmPassword: "",
@@ -69,14 +82,19 @@ export default function UserList() {
     isLoading: isFetchingUsers,
     refetch,
   } = useGetClientStaffQuery();
-  const [refreshtoken] = useRefreshTokenMutation();
+  const { run } = useAuthRetry();
+  const [fetchBranches, { data: branches }] = useGetBranchesMutation();
   const [fetchRoles, { data: roles, isLoading: isRolesLoading, isError: isRolesError }] =
     useGetRolesMutation();
   const { Logout } = useLogout();
 
   useEffect(() => {
+    setMe({ id: sessionStorage.getItem("user_id"), isAdmin: String(sessionStorage.getItem("role_id")) === "1" });
     fetchRoles();
+    fetchBranches();
   }, []);
+
+  const branchName = (id) => branches?.find((b) => String(b.branch_id) === String(id))?.branch_name || (id ? `Branch ${id}` : "-");
 
   // Filter කරපු users (users වෙනස් වුණාමත් auto update වෙනවා)
   const filteredUsers = useMemo(() => {
@@ -86,6 +104,7 @@ export default function UserList() {
     return users.filter((user) => {
       const id = user.id?.toString() ?? "";
       const first = user.first_name?.toLowerCase() ?? "";
+      const nic = user.nic?.toLowerCase() ?? "";
       const last = user.last_name?.toLowerCase() ?? "";
       const username = user.username?.toLowerCase() ?? "";
       const mobile = user.mobile?.toString() ?? "";
@@ -95,12 +114,15 @@ export default function UserList() {
         first.includes(text) ||
         last.includes(text) ||
         username.includes(text) ||
+        nic.includes(text) ||
         mobile.includes(text)
       );
     });
   }, [users, appliedFilter]);
 
-  const totalPages = Math.ceil(filteredUsers.length / USERS_PER_PAGE);
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / USERS_PER_PAGE));
+  // after a search / status change the page can be past the end
+  useEffect(() => { if (currentPage > totalPages) setCurrentPage(totalPages); }, [currentPage, totalPages]);
   const paginatedUsers = filteredUsers.slice(
     (currentPage - 1) * USERS_PER_PAGE,
     currentPage * USERS_PER_PAGE
@@ -111,36 +133,21 @@ export default function UserList() {
     setCurrentPage(1);
   };
 
-  // Token expire වුණොත් එක පාරක් refresh කරලා retry කරන fetch helper
-  const authPost = async (path, body, canRetry = true) => {
-    const token = sessionStorage.getItem("access_token");
-    const response = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}${path}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(body),
+  // POST with the bearer token; an expired token is refreshed once and the call is repeated (authRetry.js)
+  const authPost = (path, body) =>
+    run(async () => {
+      const token = sessionStorage.getItem("access_token");
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+      if (response.status === 401) {
+        const data = await response.clone().json().catch(() => ({}));
+        throw { status: 401, data };       // "Access token expired" -> run() refreshes and calls again
+      }
+      return response;
     });
-
-    if ((response.status === 401 || response.status === 403) && canRetry) {
-      const refresh_token = localStorage.getItem("refresh_token");
-      if (!refresh_token) {
-        Logout();
-        throw new Error("No refresh token");
-      }
-      try {
-        const res = await refreshtoken(refresh_token).unwrap();
-        sessionStorage.setItem("access_token", res.access_token);
-      } catch (refreshError) {
-        console.error("Error refreshing token:", refreshError);
-        Logout();
-        throw refreshError;
-      }
-      return authPost(path, body, false);
-    }
-    return response;
-  };
 
   const openViewModal = (user) => {
     setSelectedUser(user);
@@ -159,8 +166,10 @@ export default function UserList() {
       last_name: user.last_name ?? "",
       email: user.email ?? "",
       mobile: user.mobile ?? "",
+      nic: user.nic ?? "",
     });
     setSelectedRole(user.role_id ?? "");
+    setSelectedBranch(user.branch_id ?? "");
     setPasswordFormValues({ newPassword: "", confirmPassword: "" });
     setErrors({});
     setTabKey("editDetails");
@@ -183,13 +192,18 @@ export default function UserList() {
     const newErrors = {};
 
     if (tabKey === "editDetails") {
-      const { first_name, last_name, email, mobile } = formValues;
+      const { first_name, last_name, email, mobile, nic } = formValues;
+      const nameRe = /^[\p{L}\s.'-]+$/u;
       if (!first_name.trim()) newErrors.first_name = "First Name is required.";
+      else if (!nameRe.test(first_name.trim())) newErrors.first_name = "First name can only contain letters.";
       if (!last_name.trim()) newErrors.last_name = "Last Name is required.";
+      else if (!nameRe.test(last_name.trim())) newErrors.last_name = "Last name can only contain letters.";
       if (!email.trim()) newErrors.email = "Email is required.";
-      else if (!/^\S+@\S+\.\S+$/.test(email)) newErrors.email = "Invalid email format.";
+      else if (!/^\S+@\S+\.\S+$/.test(email.trim())) newErrors.email = "Invalid email format.";
       if (!String(mobile).trim()) newErrors.mobile = "Mobile number is required.";
-      else if (!/^\d{10,15}$/.test(String(mobile))) newErrors.mobile = "Invalid mobile number.";
+      else if (!/^(07\d{8}|947\d{8}|7\d{8})$/.test(String(mobile).trim())) newErrors.mobile = "Enter 07XXXXXXXX or 947XXXXXXXX.";
+      if (String(nic).trim() && !/^(\d{9}[VvXx]|\d{12})$/.test(String(nic).trim())) newErrors.nic = "Invalid NIC (old: 9 digits + V/X, new: 12 digits).";
+      if (me.isAdmin && !String(selectedRole).trim()) newErrors.role = "Select the role.";
     } else {
       const { newPassword, confirmPassword } = passwordFormValues;
       if (!newPassword || !confirmPassword) {
@@ -209,27 +223,20 @@ export default function UserList() {
   const handleSubmit = async () => {
     if (!selectedUser) return;
 
-    const user_id = sessionStorage.getItem("user_id");
-    if (!user_id) {
-      Swal.fire({ title: "Error", text: "User is not logged in.", icon: "error" });
-      return;
-    }
-
     const newErrors = validate();
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       return;
     }
 
-    const payload = {
-      ...(tabKey === "editDetails" ? formValues : passwordFormValues),
-      user_id,
-      selected_userId: selectedUser.id,
-      selectedRole,
-    };
+    // the server knows who is logged in from the token; only the user being edited is sent. Role / branch are used for an administrator only.
+    const payload =
+      tabKey === "editDetails"
+        ? { ...formValues, selected_userId: selectedUser.id, selectedRole, selectedBranch }
+        : { ...passwordFormValues, selected_userId: selectedUser.id };
 
     try {
-      await updateUser({ data: payload }).unwrap();
+      await run(() => updateUser({ data: payload }).unwrap());
       closeEditModal();
       await Swal.fire({
         title: "Success!",
@@ -241,20 +248,11 @@ export default function UserList() {
     } catch (err) {
       console.error("Error updating user:", err);
 
-      if (err?.status === 401 || err?.status === 403) {
-        await Swal.fire({
-          title: "Session Expired!",
-          text: "Your session has expired. Please log in again.",
-          icon: "warning",
-          confirmButtonText: "OK",
-        });
+      if (err?.status === 401) {
+        await Swal.fire({ title: "Session Expired!", text: "Your session has expired. Please log in again.", icon: "warning", confirmButtonText: "OK" });
         Logout();
       } else {
-        Swal.fire({
-          title: "Error",
-          text: "Failed to update user. Please try again.",
-          icon: "error",
-        });
+        Swal.fire({ title: "Error", text: err?.data?.message || "Failed to update user. Please try again.", icon: "error" });
       }
     }
   };
@@ -262,6 +260,10 @@ export default function UserList() {
   // Active / Inactive දෙකම එකම function එකකින්
   const handleStatusChange = async (id, activate) => {
     const label = activate ? "Active" : "Inactive";
+    if (!activate && String(id) === String(me.id)) {
+      Swal.fire({ title: "Not allowed", text: "You cannot make your own account inactive.", icon: "info" });
+      return;
+    }
 
     const result = await Swal.fire({
       title: `User ${label}`,
@@ -281,16 +283,16 @@ export default function UserList() {
         { id }
       );
 
-      if (response.status === 200) {
+      if (response.ok) {
         refetch();
-        Swal.fire({ title: "Success!", icon: "success", confirmButtonColor: "#3085d6" });
+        Swal.fire({ title: "Success!", icon: "success", confirmButtonColor: "#3085d6", timer: 1200, showConfirmButton: false });
       } else {
         const data = await response.json().catch(() => ({}));
-        console.error(data.message);
         Swal.fire({ title: "Error", text: data.message || "Action failed.", icon: "error" });
       }
     } catch (err) {
       console.error(err);
+      Swal.fire({ title: "Error", text: "Could not reach the server. Please try again.", icon: "error" });
     }
   };
 
@@ -311,127 +313,74 @@ export default function UserList() {
   }
 
   return (
-    <ContainerCardOnly>
-      <div className="d-flex justify-content-between mb-3">
-        <h4>User List</h4>
-        <div className="d-flex" style={{ gap: "10px" }}>
-          <input
-            type="text"
-            value={filterText}
-            onChange={(e) => setFilterText(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-            className="form-control"
-            placeholder="Search by ID, Name, or Mobile"
-            style={{ width: "250px" }}
-          />
-          <Button onClick={handleSearch}>
-            <Icon icon="material-symbols:search-rounded" width="24" height="20" />
-            Search
-          </Button>
+    <UmCard>
+      <div className="ul-bar">
+        <div className="um-title" style={{ margin: 0 }}>User List <span className="text-muted" style={{ letterSpacing: 0, textTransform: "none", fontWeight: 600 }}>({filteredUsers.length})</span></div>
+        <div className="ul-search">
+          <div className="au-wrap" style={{ flex: 1 }}>
+            <Icon icon="mdi:magnify" className="au-ico" width="19" height="19" />
+            <input
+              className="au-ctl"
+              type="text"
+              value={filterText}
+              onChange={(e) => setFilterText(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+              placeholder="Search by ID, name, username, NIC or mobile"
+            />
+          </div>
+          <Button onClick={handleSearch}>Search</Button>
         </div>
       </div>
 
-      <div className="table-responsive">
-        <Table striped bordered hover>
-          <thead className="table-light">
-            <tr>
-              <th>ID</th>
-              <th>UserName</th>
-              <th>Role</th>
-              <th>Name</th>
-              <th>Mobile Number</th>
-              <th>Status</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {paginatedUsers.length > 0 ? (
-              paginatedUsers.map((user) => {
-                const isActive = user.status === "Active";
-                return (
-                  <tr key={user.id}>
-                    <th>{user.id}</th>
-                    <td>{user.username}</td>
-                    <td>{user.role_name}</td>
-                    <td>{`${user.first_name} ${user.last_name}`}</td>
-                    <td>{user.mobile}</td>
-                    <td>
-                      <span className={`badge ${isActive ? "bg-success" : "bg-danger"} text-white`}>
-                        {isActive ? "Active" : "Inactive"}
-                      </span>
-                    </td>
-                    <td className="d-flex">
-                      <Button
-                        variant="secondary"
-                        onClick={() => openViewModal(user)}
-                        className="d-flex align-items-center justify-content-center gap-1"
-                        style={actionBtnStyle}
-                      >
-                        <Icon icon="mdi:eye" width={20} height={20} />
-                        <span style={{ fontSize: "0.75rem" }}>View</span>
-                      </Button>
-
-                      <Button
-                        variant="primary"
-                        onClick={() => openEditModal(user)}
-                        className="d-flex align-items-center justify-content-center gap-1"
-                        style={{ ...actionBtnStyle, minWidth: "120px" }}
-                      >
-                        <Icon icon="mdi:pencil" width={20} height={20} />
-                        <span style={{ fontSize: "0.75rem" }}>Edit User</span>
-                      </Button>
-
-                      {isActive ? (
-                        <Button
-                          variant="danger"
-                          onClick={() => handleStatusChange(user.id, false)}
-                          className="d-flex align-items-center justify-content-center gap-1"
-                          style={actionBtnStyle}
-                        >
-                          <Icon icon="carbon:error" width={20} height={20} />
-                          <span style={{ fontSize: "0.75rem" }}>Inactive</span>
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="success"
-                          onClick={() => handleStatusChange(user.id, true)}
-                          className="d-flex align-items-center justify-content-center gap-1"
-                          style={actionBtnStyle}
-                        >
-                          <Icon icon="carbon:checkmark-outline" width={20} height={20} />
-                          <span style={{ fontSize: "0.75rem" }}>Active</span>
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })
-            ) : (
-              <tr>
-                <td colSpan="7" className="text-center">
-                  No users found
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </Table>
+      <div className="ul-list">
+        {paginatedUsers.length > 0 ? (
+          paginatedUsers.map((user) => {
+            const isActive = user.status === "Active";
+            const initials = `${(user.first_name || "?")[0]}${(user.last_name || "")[0] || ""}`.toUpperCase();
+            return (
+              <div className="ul-row" key={user.id}>
+                <div className="ul-av">{initials}</div>
+                <div className="ul-main">
+                  <div className="ul-name">{user.first_name} {user.last_name}</div>
+                  <div className="ul-sub">@{user.username} · ID {user.id}</div>
+                </div>
+                <div className="ul-col"><div className="ul-lab">Role</div><div className="ul-val">{user.role_name}</div></div>
+                <div className="ul-col"><div className="ul-lab">Mobile</div><div className="ul-val">{user.mobile}</div></div>
+                <div className="ul-col"><span className={`ul-pill ${isActive ? "on" : "off"}`}>{isActive ? "Active" : "Inactive"}</span></div>
+                <div className="ul-act">
+                  <button type="button" className="ul-btn" onClick={() => openViewModal(user)}><Icon icon="mdi:eye-outline" width={18} height={18} /> View</button>
+                  <button type="button" className="ul-btn dark" onClick={() => openEditModal(user)}><Icon icon="mdi:pencil-outline" width={18} height={18} /> Edit</button>
+                  {isActive ? (
+                    <button type="button" className="ul-btn red" disabled={String(user.id) === String(me.id)} title={String(user.id) === String(me.id) ? "You cannot make your own account inactive" : undefined} onClick={() => handleStatusChange(user.id, false)}>
+                      <Icon icon="mdi:account-off-outline" width={18} height={18} /> Inactive
+                    </button>
+                  ) : (
+                    <button type="button" className="ul-btn green" onClick={() => handleStatusChange(user.id, true)}>
+                      <Icon icon="mdi:account-check-outline" width={18} height={18} /> Active
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        ) : (
+          <div className="text-center text-muted py-4">No users found</div>
+        )}
       </div>
 
-      <div className="d-flex justify-content-end">
+      <div className="d-flex justify-content-end mt-3">
         <Pagination>
           <Pagination.Prev
             disabled={currentPage <= 1}
             onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
           />
-          {[...Array(totalPages)].map((_, index) => (
-            <Pagination.Item
-              key={index + 1}
-              active={index + 1 === currentPage}
-              onClick={() => setCurrentPage(index + 1)}
-            >
-              {index + 1}
-            </Pagination.Item>
-          ))}
+          {pageWindow(currentPage, totalPages).map((p, i) =>
+            p === "…" ? (
+              <Pagination.Ellipsis key={`e${i}`} disabled />
+            ) : (
+              <Pagination.Item key={p} active={p === currentPage} onClick={() => setCurrentPage(p)}>{p}</Pagination.Item>
+            )
+          )}
           <Pagination.Next
             disabled={currentPage >= totalPages}
             onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
@@ -440,7 +389,7 @@ export default function UserList() {
       </div>
 
       {/* View Modal */}
-      <Modal show={showViewModal} onHide={closeViewModal}>
+      <Modal show={showViewModal} onHide={closeViewModal} className="um-modal">
         <Modal.Header closeButton>
           <Modal.Title>User Details</Modal.Title>
         </Modal.Header>
@@ -448,12 +397,24 @@ export default function UserList() {
           {selectedUser && (
             <div className="px-2">
               <Row className="mb-2">
+                <Col xs={5} className="fw-bold text-muted">Username:</Col>
+                <Col xs={7}>{selectedUser.username}</Col>
+              </Row>
+              <Row className="mb-2">
                 <Col xs={5} className="fw-bold text-muted">Name:</Col>
                 <Col xs={7}>{selectedUser.first_name} {selectedUser.last_name}</Col>
               </Row>
               <Row className="mb-2">
+                <Col xs={5} className="fw-bold text-muted">NIC:</Col>
+                <Col xs={7}>{selectedUser.nic || "-"}</Col>
+              </Row>
+              <Row className="mb-2">
                 <Col xs={5} className="fw-bold text-muted">Email:</Col>
-                <Col xs={7}>{selectedUser.email}</Col>
+                <Col xs={7}>{selectedUser.email || "-"}</Col>
+              </Row>
+              <Row className="mb-2">
+                <Col xs={5} className="fw-bold text-muted">Branch:</Col>
+                <Col xs={7}>{branchName(selectedUser.branch_id)}</Col>
               </Row>
               <Row className="mb-2">
                 <Col xs={5} className="fw-bold text-muted">Mobile Number:</Col>
@@ -480,7 +441,7 @@ export default function UserList() {
       </Modal>
 
       {/* Edit Modal */}
-      <Modal show={showEditModal} onHide={closeEditModal}>
+      <Modal show={showEditModal} onHide={closeEditModal} className="um-modal">
         <Modal.Header closeButton>
           <Modal.Title>Edit User Details</Modal.Title>
         </Modal.Header>
@@ -522,8 +483,14 @@ export default function UserList() {
                     {errors.mobile && <small className="text-danger">{errors.mobile}</small>}
                   </Form.Group>
 
-                  <FormLabel className="mt-2">Select Role</FormLabel>
-                  <FormSelect value={selectedRole} onChange={(e) => setSelectedRole(e.target.value)}>
+                  <Form.Group controlId="nic">
+                    <FormLabel>NIC</FormLabel>
+                    <FormControl type="text" name="nic" value={formValues.nic} onChange={handleInputChange} />
+                    {errors.nic && <small className="text-danger">{errors.nic}</small>}
+                  </Form.Group>
+
+                  <FormLabel className="mt-2">Select Role {!me.isAdmin && <small className="text-muted">(only an administrator can change it)</small>}</FormLabel>
+                  <FormSelect value={selectedRole} disabled={!me.isAdmin || String(selectedUser?.id) === String(me.id)} onChange={(e) => { setSelectedRole(e.target.value); setErrors((p) => ({ ...p, role: "" })); }}>
                     <option value="">Select Role</option>
                     {isRolesLoading && <option disabled>Loading roles...</option>}
                     {isRolesError && <option disabled>Error loading roles</option>}
@@ -533,6 +500,17 @@ export default function UserList() {
                       </option>
                     ))}
                   </FormSelect>
+                  {errors.role && <small className="text-danger">{errors.role}</small>}
+
+                  {me.isAdmin && (
+                    <>
+                      <FormLabel className="mt-2">Select Branch</FormLabel>
+                      <FormSelect value={selectedBranch} onChange={(e) => setSelectedBranch(e.target.value)}>
+                        <option value="">Keep the current branch</option>
+                        {branches?.map((b) => <option key={b.branch_id} value={b.branch_id}>{b.branch_name}</option>)}
+                      </FormSelect>
+                    </>
+                  )}
                 </Form>
               </Tab.Pane>
 
@@ -575,6 +553,6 @@ export default function UserList() {
           </Button>
         </Modal.Footer>
       </Modal>
-    </ContainerCardOnly>
+    </UmCard>
   );
 }

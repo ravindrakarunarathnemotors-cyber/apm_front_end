@@ -9,25 +9,62 @@ const baseQuery = fetchBaseQuery({
   },
 });
 
+// One refresh at a time: if several requests get 401 together they all wait for the same refresh
+let refreshPromise = null;
+
+const readRefreshToken = () => {
+  try {
+    return (typeof window !== "undefined" && localStorage.getItem("refresh_token")) || null;
+  } catch {
+    return null;
+  }
+};
+
+const doRefresh = async (api, extraOptions) => {
+  const refresh_token = readRefreshToken();
+  const res = await baseQuery(
+    {
+      url: "/auth/refresh-token",
+      method: "POST",
+      // the backend reads refresh_token from the body; the cookie is sent too (credentials: include)
+      body: refresh_token ? { refresh_token } : {},
+    },
+    api,
+    extraOptions
+  );
+
+  if (res?.data) {
+    // keep any new tokens the server returns (cookies are set by the server itself)
+    try {
+      const d = res.data;
+      const at = d.access_token || d.accessToken;
+      const rt = d.refresh_token || d.refreshToken;
+      if (at) sessionStorage.setItem("access_token", at);
+      if (rt) localStorage.setItem("refresh_token", rt);
+    } catch {}
+    return true;
+  }
+  return false;
+};
+
 const baseQueryWithReauth = async (args, api, extraOptions) => {
   let result = await baseQuery(args, api, extraOptions);
 
-  // :fire: Access token expired
-  if (result?.error?.status === 401 || result?.error?.status === 403) {
-    const refreshResult = await baseQuery(
-      {
-        url: "/auth/refresh-token",
-        method: "POST",
-      },
-      api,
-      extraOptions
-    );
+  // Only 401 means "token missing / expired". 403 is "forbidden" and must not trigger a refresh loop.
+  if (result?.error?.status === 401) {
+    const url = typeof args === "string" ? args : args?.url;
+    if (url && url.includes("/auth/")) return result; // never refresh for login / refresh calls
 
-    if (refreshResult?.data) {
-      // retry original request
-      result = await baseQuery(args, api, extraOptions);
+    if (!refreshPromise) {
+      refreshPromise = doRefresh(api, extraOptions).finally(() => {
+        refreshPromise = null;
+      });
+    }
+    const ok = await refreshPromise;
+
+    if (ok) {
+      result = await baseQuery(args, api, extraOptions); // retry original request once
     } else {
-      // refresh failed → logout
       api.dispatch({ type: "auth/logout" });
     }
   }
@@ -1161,6 +1198,13 @@ InvSend: builder.mutation({                   // { url, method = "POST", body }
   invalidatesTags: ["Inventory", "Evidence"],
 }),
 
+    getCustomerSources: builder.query({
+      query: () => `/api/customer-sources`,
+    }),
+    checkReferralCode: builder.query({
+      query: (code) => `/api/customers/referral/${encodeURIComponent(code)}`,
+    }),
+
 
   }),
 })
@@ -1329,5 +1373,6 @@ useGetStockLedgerQuery,
 useJobPartActionMutation,
 useInvGetQuery,
   useInvSendMutation,
-
+ useGetCustomerSourcesQuery, 
+ useLazyCheckReferralCodeQuery 
 } = apiSlice

@@ -99,7 +99,9 @@ export default function JobsTabs() {
                 className="jt-link nav-link d-inline-flex align-items-center gap-2 fw-semibold border shadow-sm"
                 aria-current={active ? "page" : undefined}
                 style={{
-                  ...(active ? { backgroundColor: t.color, borderColor: t.color, color: "#fff" } : { color: t.color, backgroundColor: "#fff" }),
+                  ...(active
+                    ? { background: "linear-gradient(135deg,#000000 0%,#1c1c1c 50%,#3d3d3d 100%)", borderColor: "#000", color: "#fff", boxShadow: `inset 0 -4px 0 ${t.href === "/job-dashboard" ? "#c8102e" : t.color}` }
+                    : { color: t.color, backgroundColor: "#fff" }),
                 }}
               >
                 <Icon icon={t.icon} width="24" height="24" /> {t.label}

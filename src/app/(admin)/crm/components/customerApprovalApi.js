@@ -19,6 +19,14 @@ const customerApprovalApi = apiSlice.injectEndpoints({
       query: ({ jobId, ...body }) => ({ url: `/customer_approval/jobs/${jobId}/customer-approval/logistics`, method: "POST", body }),
       invalidatesTags: ["Evidence"],
     }),
+    sendClientPartsSms: builder.mutation({        // { jobId, phone? } -> { sms: { sent, to?, error? }, saved }  (SMS with the spare parts report link)
+      query: ({ jobId, ...body }) => ({ url: `/customer_approval/jobs/${jobId}/customer-approval/send-parts-sms`, method: "POST", body }),
+      invalidatesTags: ["Evidence"],
+    }),
+    sendApprovalSms: builder.mutation({           // { jobId, includeSpareParts, includeLabour, time?, phone? } -> { sms: { sent, to?, error? }, total }
+      query: ({ jobId, ...body }) => ({ url: `/customer_approval/jobs/${jobId}/customer-approval/send-sms`, method: "POST", body }),
+      invalidatesTags: ["Evidence"],
+    }),
     completeCustomerApproval: builder.mutation({  // jobId
       query: (jobId) => ({ url: `/customer_approval/jobs/${jobId}/customer-approval/complete`, method: "POST" }),
       invalidatesTags: ["Evidence", "Jobs"],
@@ -31,5 +39,7 @@ export const {
   useSaveCustomerApprovalMutation,
   useMarkClientListSentMutation,
   useSendApprovalLogisticsMutation,
+  useSendApprovalSmsMutation,
+  useSendClientPartsSmsMutation,
   useCompleteCustomerApprovalMutation,
 } = customerApprovalApi;

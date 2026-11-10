@@ -45,10 +45,10 @@ function MediaThumbs({ entries, onOpen, disabled }) {
   return (
     <div className="d-flex flex-wrap gap-2 mt-2">
       {entries.map((e) => (
-        <div key={e.key} style={{ width: 104 }}>
+        <div key={e.key} style={{ width: 112 }}>
           <div
-            className={`position-relative rounded-2 overflow-hidden bg-dark ${e.status === "error" ? "border border-2 border-danger" : "border"}`}
-            style={{ width: 104, height: 104, cursor: "pointer" }}
+            className={`position-relative rounded-3 overflow-hidden bg-dark ${e.status === "error" ? "border border-2 border-danger" : "border"}`}
+            style={{ width: 112, height: 112, cursor: "pointer" }}
             role="button"
             tabIndex={0}
             title={e.name}
@@ -120,6 +120,30 @@ function PickButtons({ onPick, disabled }) {
       <Button size="sm" variant="outline-secondary" disabled={disabled} onClick={() => onPick("gallery")} title="Choose many photos / videos at once from this device">
         <Icon icon="mdi:upload" width="16" height="16" /> Upload many
       </Button>
+    </div>
+  );
+}
+
+// Big upload area: dashed box with a cloud icon (tap / click = choose from the gallery, or drop files on it on a computer),
+// and two large buttons to open the camera for a photo / a video (phones and tablets).
+function Dropzone({ onPick, onFiles, disabled, hint }) {
+  const [over, setOver] = useState(false);
+  return (
+    <div className={`ve-drop ${over ? "over" : ""} ${disabled ? "off" : ""}`}
+      onDragOver={(e) => { if (disabled) return; e.preventDefault(); setOver(true); }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => { e.preventDefault(); setOver(false); if (!disabled && e.dataTransfer?.files?.length) onFiles(Array.from(e.dataTransfer.files)); }}>
+      <button type="button" className="ve-drop-main" disabled={disabled} onClick={() => onPick("gallery")}>
+        <span className="ve-cloud"><Icon icon="mdi:cloud-upload" width="46" height="46" /></span>
+        <span className="ve-drop-title">Browse file to upload</span>
+        <span className="ve-drop-sub ve-only-mouse">or drag &amp; drop photos / videos here</span>
+        <span className="ve-drop-sub ve-only-touch">Tap to choose photos / videos from your phone</span>
+        {hint && <span className="ve-drop-hint">{hint}</span>}
+      </button>
+      <div className="ve-drop-cam">
+        <button type="button" disabled={disabled} onClick={() => onPick("photo")}><Icon icon="mdi:camera" width="24" height="24" /> Take photo</button>
+        <button type="button" disabled={disabled} onClick={() => onPick("video")}><Icon icon="mdi:video" width="24" height="24" /> Record video</button>
+      </div>
     </div>
   );
 }
@@ -273,6 +297,12 @@ export default function VehicleEvidenceModal({ jobId, onHide, onSaved, preDepart
   };
 
   // ---- pick -> preview at once -> rename -> upload -> register ----
+  // files dropped on the upload area (computer): same path as the file picker
+  const dropFiles = (files, itemId, category = "GENERAL") => {
+    targetRef.current = itemId;
+    categoryRef.current = category;
+    onPicked({ target: { files, value: "" } });
+  };
   const pick = (kind, itemId, category = "GENERAL") => {
     targetRef.current = itemId;
     categoryRef.current = category;
@@ -382,13 +412,57 @@ export default function VehicleEvidenceModal({ jobId, onHide, onSaved, preDepart
 
   return (
     <>
-      <Modal show onHide={saving ? undefined : onHide} size="lg" centered scrollable fullscreen="md-down" backdrop="static" enforceFocus={!managing && !preview}>
-        <Modal.Header closeButton={!saving}>
-          <Modal.Title className="fs-5 d-flex align-items-center gap-2">
-            <Icon icon="mdi:car-search-outline" width="24" height="24" color={ui.color} />
+      <style>{`
+        @media (min-width: 992px) { .modal-dialog.ve-modal { --bs-modal-width: 880px; } }
+        .ve-modal .modal-content { border: 0; border-radius: 18px; overflow: hidden; box-shadow: 0 24px 60px -18px rgba(0,0,0,.6); }
+        .ve-modal .ve-head { background: linear-gradient(135deg,#0a0a0a 0%,#7a0a14 55%,#c8102e 100%); color: #fff; border: 0; padding: 16px 22px; }
+        .ve-modal .modal-body { background: #f6f6f7; padding: 18px 22px; }
+        .ve-modal .modal-body > div > .bg-white.border.rounded-3,
+        .ve-modal .modal-body .bg-white.border.rounded-3 { border-radius: 14px !important; border: 1px solid #e3e3e6 !important; border-left: 5px solid #c8102e !important; box-shadow: 0 4px 14px -10px rgba(15,23,42,.45); padding: 14px 18px !important; }
+        .ve-modal .modal-body .bg-white.border.rounded-3.border-warning { border-left-color: #d97706 !important; }
+        .ve-modal .modal-body .border.rounded-2 { border-radius: 12px !important; border-color: #e3e3e6 !important; }
+        .ve-modal .btn-outline-primary { color: #111; border: 1.5px solid #111; border-radius: 10px; font-weight: 600; background: #fff; }
+        .ve-modal .btn-outline-primary:hover, .ve-modal .btn-outline-primary:focus { color: #fff; background: #111; border-color: #111; }
+        .ve-modal .btn-outline-secondary { color: #111; border: 1.5px solid #c4c4ca; border-radius: 10px; font-weight: 600; background: #fff; }
+        .ve-modal .btn-outline-secondary:hover { color: #fff; background: #111; border-color: #111; }
+        .ve-modal .btn-outline-success, .ve-modal .btn-outline-danger, .ve-modal .btn-outline-warning { border-radius: 10px; font-weight: 600; }
+        .ve-modal .btn-success { border-radius: 10px; font-weight: 600; }
+        .ve-modal .ve-main, .ve-modal .modal-footer .btn-primary { color: #fff !important; border: 0 !important; border-radius: 12px; font-weight: 700; min-height: 46px; padding: 0 22px; background: linear-gradient(135deg,#000000 0%,#1c1c1c 50%,#3d3d3d 100%); box-shadow: inset 0 -3px 0 #c8102e, 0 8px 18px -8px rgba(0,0,0,.6); }
+        .ve-modal .ve-main:hover, .ve-modal .modal-footer .btn-primary:hover { filter: brightness(1.25); }
+        .ve-modal .ve-cancel { border-radius: 12px; min-height: 46px; padding: 0 20px; font-weight: 600; background: #fff; color: #111; border: 1.5px solid #c4c4ca; }
+        .ve-modal .form-control, .ve-modal .input-group-text { border-radius: 10px; border: 1.5px solid #c4c4ca; }
+        .ve-modal .input-group > .form-control { border-radius: 0 10px 10px 0; }
+        .ve-modal .input-group > .input-group-text { border-radius: 10px 0 0 10px; background: #fde8ea; color: #c8102e; border-right: 0; }
+        .ve-modal .form-control:focus { border-color: #c8102e; box-shadow: 0 0 0 4px rgba(200,16,46,.15); }
+        .ve-modal .form-check-input:checked { background-color: #c8102e; border-color: #c8102e; }
+        .ve-modal .form-check-input:focus { border-color: #c8102e; box-shadow: 0 0 0 4px rgba(200,16,46,.15); }
+        .ve-modal .modal-footer { background: #f6f6f7; border-top: 1px solid #e3e3e6; padding: 12px 22px; }
+        .ve-drop { border: 2.5px dashed #c8102e; border-radius: 16px; background: #fff; padding: 10px; transition: background .15s, border-color .15s, box-shadow .15s; }
+        .ve-drop.over { background: #fff1f2; border-color: #7a0a14; box-shadow: 0 0 0 5px rgba(200,16,46,.15); }
+        .ve-drop.off { opacity: .55; }
+        .ve-drop-main { width: 100%; border: 0; background: transparent; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 18px 8px 14px; cursor: pointer; }
+        .ve-drop-main:disabled { cursor: default; }
+        .ve-cloud { width: 78px; height: 78px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; color: #c8102e; background: #fde8ea; }
+        .ve-drop-main:hover:not(:disabled) .ve-cloud { background: #c8102e; color: #fff; }
+        .ve-drop-title { font-size: 1.15rem; font-weight: 700; color: #c8102e; }
+        .ve-drop-sub { font-size: .85rem; color: #64748b; }
+        .ve-drop-hint { font-size: .8rem; color: #64748b; margin-top: 2px; }
+        .ve-only-touch { display: none; }
+        @media (hover: none) { .ve-only-touch { display: inline; } .ve-only-mouse { display: none; } }
+        .ve-drop-cam { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; border-top: 1.5px dashed #e3b4ba; padding-top: 10px; }
+        .ve-drop-cam button { min-height: 56px; border: 0; border-radius: 12px; color: #fff; font-weight: 700; font-size: 1rem; display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: linear-gradient(135deg,#000000 0%,#1c1c1c 50%,#3d3d3d 100%); box-shadow: inset 0 -3px 0 #c8102e; }
+        .ve-drop-cam button:active:not(:disabled) { filter: brightness(1.4); }
+        .ve-drop-cam button:disabled { opacity: .5; }
+        .ve-modal .ve-plate { display: inline-flex; background: #facc15; color: #111; border: 1.5px solid #111; border-radius: 6px; padding: 1px 9px; font-weight: 800; font-size: .82rem; letter-spacing: .05em; }
+        .ve-modal .ve-jobno { display: inline-block; background: #111; color: #fff; border-radius: 8px; padding: 3px 10px; font-weight: 700; font-size: .82rem; box-shadow: inset 3px 0 0 #c8102e; }
+      `}</style>
+      <Modal show onHide={saving ? undefined : onHide} centered scrollable fullscreen="md-down" backdrop="static" enforceFocus={!managing && !preview} dialogClassName="ve-modal">
+        <Modal.Header closeButton={!saving} closeVariant="white" className="ve-head">
+          <Modal.Title className="fs-5 d-flex align-items-center gap-2 text-white">
+            <Icon icon="mdi:car-search-outline" width="28" height="28" />
             <span>
               {preDepartment ? "Vehicle Evidence" : "Vehicle Evidence of Damages"}
-              {job && !preDepartment && <span className="text-muted fw-normal">{` / ${job.departmentName} Department / Open window`}</span>}
+              {job && !preDepartment && <span className="fw-normal" style={{ color: "rgba(255,255,255,.75)" }}>{` / ${job.departmentName} Department / Open window`}</span>}
             </span>
           </Modal.Title>
         </Modal.Header>
@@ -404,7 +478,7 @@ export default function VehicleEvidenceModal({ jobId, onHide, onSaved, preDepart
 
           {data && (
             <>
-              <div className="small text-muted mb-3"><strong className="text-dark">{job.jobNo}</strong> · {job.regNo}</div>
+              <div className="d-flex align-items-center gap-2 mb-3"><span className="ve-jobno">{job.jobNo}</span><span className="ve-plate">{job.regNo}</span></div>
               {readOnly && <Alert variant="secondary" className="py-2">This job is not ready for vehicle evidence yet.</Alert>}
               {serverError && <Alert variant="danger" className="py-2" dismissible onClose={() => setServerError("")}>{serverError}</Alert>}
 
@@ -412,13 +486,11 @@ export default function VehicleEvidenceModal({ jobId, onHide, onSaved, preDepart
               {uploadOnly && (
                 <>
                   <div className="bg-white border rounded-3 p-2 px-3 mb-2">
-                    <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
-                      <div>
-                        <div className="fw-bold">Photos / videos</div>
-                        <div className="small text-muted">Take photos or videos of the vehicle, or choose them from the gallery. You can add many at once.</div>
-                      </div>
-                      <PickButtons onPick={(k) => pick(k, null)} disabled={readOnly} />
+                    <div className="mb-2">
+                      <div className="fw-bold">Photos / videos</div>
+                      <div className="small text-muted">Take photos or videos of the vehicle, or choose them from the gallery. You can add many at once.</div>
                     </div>
+                    <Dropzone onPick={(k) => pick(k, null)} onFiles={(f) => dropFiles(f, null)} disabled={readOnly} hint={`Photos up to ${MAX_IMAGE_MB}MB · videos up to ${MAX_VIDEO_MB}MB`} />
                     <MediaThumbs entries={[null, ...items.map((i) => i.id)].flatMap((id) => entriesOf(id))} onOpen={setPreview} disabled={readOnly} />
                   </div>
 
@@ -440,10 +512,8 @@ export default function VehicleEvidenceModal({ jobId, onHide, onSaved, preDepart
                       </div>
                       {propertyInside === true && (
                         <div className="mt-2 pt-2 border-top">
-                          <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
-                            <div className="small text-muted">Take photos or videos of the customer s property inside the vehicle (bags, tools, documents ...).</div>
-                            <PickButtons onPick={(k) => pick(k, null, "PROPERTY")} disabled={readOnly} />
-                          </div>
+                          <div className="small text-muted mb-2">Take photos or videos of the customer&apos;s property inside the vehicle (bags, tools, documents ...).</div>
+                          <Dropzone onPick={(k) => pick(k, null, "PROPERTY")} onFiles={(f) => dropFiles(f, null, "PROPERTY")} disabled={readOnly} />
                           <MediaThumbs
                             entries={[
                               ...propFiles.map((f) => ({ key: `f${f.id}`, url: f.fileUrl, name: f.fileName, type: f.fileType, status: "saved", onRemove: () => removeOne(f) })),
@@ -619,13 +689,11 @@ export default function VehicleEvidenceModal({ jobId, onHide, onSaved, preDepart
               {/* General photos / videos (not tied to one checklist item) */}
               {!uploadOnly && (
               <div className="bg-white border rounded-3 p-2 px-3 mb-2">
-                <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
-                  <div>
-                    <div className="fw-bold">{photosOnly ? "Photos / videos" : "Other photos / videos"}</div>
-                    <div className="small text-muted">{photosOnly ? "Take photos or videos of the vehicle, or choose them from the gallery. You can add many." : "Whole vehicle, odometer, damages ... (not tied to one item)"}</div>
-                  </div>
-                  <PickButtons onPick={(k) => pick(k, null)} disabled={readOnly} />
+                <div className="mb-2">
+                  <div className="fw-bold">{photosOnly ? "Photos / videos" : "Other photos / videos"}</div>
+                  <div className="small text-muted">{photosOnly ? "Take photos or videos of the vehicle, or choose them from the gallery. You can add many." : "Whole vehicle, odometer, damages ... (not tied to one item)"}</div>
                 </div>
+                <Dropzone onPick={(k) => pick(k, null)} onFiles={(f) => dropFiles(f, null)} disabled={readOnly} />
                 <MediaThumbs entries={entriesOf(null)} onOpen={setPreview} disabled={readOnly} />
               </div>
               )}
@@ -679,9 +747,9 @@ export default function VehicleEvidenceModal({ jobId, onHide, onSaved, preDepart
 
         <Modal.Footer>
           {data && !readOnly && preDepartment && stage4Problem && <span className="small text-muted align-self-center me-auto">{stage4Problem}</span>}
-          <Button variant="secondary" onClick={onHide} disabled={saving}>Cancel</Button>
+          <Button variant="light" className="ve-cancel" onClick={onHide} disabled={saving}>Cancel</Button>
           {data && !readOnly && (
-            <Button onClick={() => submit(false)} disabled={saving || uploading} title={uploading ? "Wait until the uploads finish" : undefined}>
+            <Button className="ve-main" onClick={() => submit(false)} disabled={saving || uploading} title={uploading ? "Wait until the uploads finish" : undefined}>
               <Icon icon="mdi:content-save-outline" width="20" height="20" /> {saving ? "Saving..." : data.evidence ? "Update evidence" : "Save evidence"}
             </Button>
           )}

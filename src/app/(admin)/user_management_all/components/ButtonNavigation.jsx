@@ -1,142 +1,45 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import { UserPlus, ShieldPlus, Users, UserCheck } from "lucide-react";
 
+// Tabs of the User Management screens. Same look as the Settings page: white cards, light grey border, black active tab with a maroon edge.
 const buttons = [
   { title: "Add User", key: "add_user", icon: UserPlus },
   { title: "Add Role", key: "add_role", icon: ShieldPlus },
   { title: "User List", key: "user_list", icon: Users },
-  { title: "User Role", key: "role_list", icon: UserCheck },
+  { title: "Role List", key: "role_list", icon: UserCheck },
 ];
+const ADMIN_ONLY = ["add_role", "role_list"];
 
-export default function ButtonNavigation({ active, onChange }) {
-  const [hovered, setHovered] = useState(null);
-  const [pressed, setPressed] = useState(null);
+export default function ButtonNavigation({ active, onChange, isAdmin = false }) {
+  const list = buttons.filter((b) => isAdmin || !ADMIN_ONLY.includes(b.key));
 
   return (
-    <div style={styles.container}>
-      {buttons.map((btn) => {
+    <div className="um-tabs" role="tablist" aria-label="User management">
+      <style>{`
+        .um-tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; padding: 12px 0; width: 100%; }
+        .um-tab { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 48px; padding: 8px 14px; background: #fff; color: #111;
+          border: 1px solid #e3e3e6; border-radius: 12px; font-weight: 600; font-size: .95rem; cursor: pointer; min-width: 0;
+          transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease; }
+        .um-tab span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .um-tab .um-ico { color: #c8102e; flex: 0 0 auto; }
+        .um-tab:hover { background: #f6f6f7; border-color: #c4c4ca; }
+        .um-tab:focus-visible { outline: 2px solid #c8102e; outline-offset: 2px; }
+        .um-tab.on { background: #111; color: #fff; border-color: #111; box-shadow: inset 4px 0 0 #c8102e; }
+        .um-tab.on .um-ico { color: #fff; }
+        @media (max-width: 575px) { .um-tabs { grid-template-columns: repeat(2, 1fr); gap: 8px; } .um-tab { min-height: 44px; font-size: .88rem; padding: 6px 10px; gap: 8px; } }
+      `}</style>
+      {list.map((btn) => {
         const Icon = btn.icon;
-        const isActive = active === btn.key;
-        const isHovered = hovered === btn.key;
-        const isPressed = pressed === btn.key;
-        const highlight = isActive || isHovered;
-
+        const on = active === btn.key;
         return (
-          <button
-            key={btn.key}
-            type="button"
-            onClick={() => onChange(btn.key)}
-            onMouseEnter={() => setHovered(btn.key)}
-            onMouseLeave={() => {
-              setHovered(null);
-              setPressed(null);
-            }}
-            onMouseDown={() => setPressed(btn.key)}
-            onMouseUp={() => setPressed(null)}
-            onFocus={() => setHovered(btn.key)}
-            onBlur={() => setHovered(null)}
-            style={{
-              ...styles.cardButton,
-              ...(isActive ? styles.cardButtonActive : {}),
-              ...(isHovered ? styles.cardButtonHover : {}),
-              ...(isPressed ? styles.cardButtonPressed : {}),
-            }}
-          >
-            <div
-              style={{
-                ...styles.iconWrapper,
-                ...(highlight ? styles.iconWrapperHover : {}),
-              }}
-            >
-              <Icon size={20} color={highlight ? "#ffffff" : "#6366f1"} />
-            </div>
-            <span
-              style={{
-                ...styles.buttonText,
-                ...(highlight ? styles.buttonTextHover : {}),
-              }}
-            >
-              {btn.title}
-            </span>
+          <button key={btn.key} type="button" role="tab" aria-selected={on} aria-current={on ? "page" : undefined} className={`um-tab ${on ? "on" : ""}`} onClick={() => onChange(btn.key)}>
+            <Icon size={19} className="um-ico" />
+            <span>{btn.title}</span>
           </button>
         );
       })}
     </div>
   );
 }
-
-const styles = {
-  container: {
-    display: "grid",
-    // Mobile වලදී Row 2ක් (Columns 2ක්) ලෙසද, Medium/Large screens වලදී Columns 4ක් ලෙසද ස්වයංක්‍රීයව වෙනස් වේ
-    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-    gap: "12px",
-    padding: "16px",
-    backgroundColor: "#f8fafc",
-    width: "100%",
-    boxSizing: "border-box",
-  },
-  cardButton: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#ffffff",
-    color: "#1e293b",
-    border: "1px solid #e2e8f0",
-    borderRadius: "12px",
-    padding: "12px 16px",
-    cursor: "pointer",
-    outline: "none",
-    boxShadow:
-      "0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)",
-    transform: "translateY(0)",
-    transition:
-      "transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s ease, border-color 0.25s ease, background-color 0.25s ease",
-    width: "100%",
-    minWidth: 0, // Text overflow වෙන එක වළක්වයි
-  },
-  cardButtonActive: {
-    borderColor: "#6366f1",
-    backgroundColor: "#eef2ff",
-    boxShadow: "0 8px 16px -6px rgba(99, 102, 241, 0.3)",
-  },
-  cardButtonHover: {
-    transform: "translateY(-4px)",
-    borderColor: "#6366f1",
-    boxShadow:
-      "0 12px 24px -6px rgba(99, 102, 241, 0.25), 0 4px 8px -2px rgba(0, 0, 0, 0.06)",
-  },
-  cardButtonPressed: {
-    transform: "translateY(-1px) scale(0.98)",
-    boxShadow: "0 4px 8px -2px rgba(99, 102, 241, 0.2)",
-  },
-  iconWrapper: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#eef2ff",
-    padding: "8px",
-    borderRadius: "10px",
-    marginRight: "10px",
-    flexShrink: 0,
-    transition: "background-color 0.25s ease, transform 0.25s ease",
-  },
-  iconWrapperHover: {
-    backgroundColor: "#6366f1",
-    transform: "scale(1.08) rotate(-4deg)",
-  },
-  buttonText: {
-    fontSize: "14px",
-    fontWeight: "600",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    transition: "color 0.25s ease",
-  },
-  buttonTextHover: {
-    color: "#4f46e5",
-  },
-};

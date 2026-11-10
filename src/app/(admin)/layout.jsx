@@ -19,7 +19,7 @@ const AdminLayout = ({
 
       <div className="page-wrapper">
         <div className="page-content">
-          <div className="container-fluid" style={{ maxWidth: 1600 }}>
+          <div className="container-fluid" style={{ maxWidth: 1400 }}>
             <Suspense>{children}</Suspense>
           </div>
           <Footer />

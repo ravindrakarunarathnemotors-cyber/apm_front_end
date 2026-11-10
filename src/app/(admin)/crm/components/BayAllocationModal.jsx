@@ -6,6 +6,7 @@ import { Icon } from "@iconify/react";
 import Swal from "sweetalert2";
 import { useGetJobBayAllocationQuery, useSaveJobBayAllocationMutation } from "@/store/features/apiSlice";
 import { getDepartmentUi } from "./departmentConfig";
+import { usePermissions } from "./permissionsApi"; // action permissions
 import ManageTeamsBaysModal from "./ManageTeamsBaysModal";
 
 // Stage 6 · Bay Allocation  (departments that use bays without teams, e.g. Wash)
@@ -16,6 +17,7 @@ export default function BayAllocationModal({ jobId, onHide, onSaved }) {
   const [bayId, setBayId] = useState("");
   const [touched, setTouched] = useState(false);
   const [serverError, setServerError] = useState("");
+  const { can } = usePermissions();
   const [managing, setManaging] = useState(false);
 
   const job = data?.job;
@@ -70,9 +72,11 @@ export default function BayAllocationModal({ jobId, onHide, onSaved }) {
             <>
               <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
                 <div className="small text-muted"><strong className="text-dark">{job.jobNo}</strong> · {job.regNo}</div>
-                <Button size="sm" variant="outline-primary" onClick={() => setManaging(true)}>
-                  <Icon icon="mdi:cog-outline" width="18" height="18" /> Manage bays
-                </Button>
+                {can("bay.manage") && (
+                  <Button size="sm" variant="outline-primary" onClick={() => setManaging(true)}>
+                    <Icon icon="mdi:cog-outline" width="18" height="18" /> Manage bays
+                  </Button>
+                )}
               </div>
 
               {readOnly && <Alert variant="secondary" className="py-2">This job is not ready for bay allocation yet.</Alert>}

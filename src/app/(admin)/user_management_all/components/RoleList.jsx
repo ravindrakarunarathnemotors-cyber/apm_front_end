@@ -1,13 +1,13 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
-import ComponentContainerCard from "@/components/ComponentContainerCard";
+import UmCard from "./UmCard";
 import { Table, Pagination, Button, Form, Spinner } from "react-bootstrap";
 import {
   useGetRolesTableMutation,
   useUpdateRoleStatusMutation,
-  useRefreshTokenMutation,
 } from "@/store/features/apiSlice";
+import useAuthRetry from "./authRetry";
 import Swal from "sweetalert2";
 import { Icon } from "@iconify/react";
 import RedCard from "@/components/Redcard";
@@ -35,45 +35,16 @@ export default function RoleList() {
 
   const [fetchRoles, { data: roles, isLoading }] = useGetRolesTableMutation();
   const [updateRoleStatus] = useUpdateRoleStatusMutation();
-  const [refreshtoken] = useRefreshTokenMutation();
+  const { run } = useAuthRetry();
 
   const totalPages = Math.max(Number(roles?.totalPages) || 1, 1);
 
-  const logoutUser = () => {
-    sessionStorage.clear();
-    localStorage.clear();
-    window.location.href = "/auth/login";
-  };
-
-  // sessionStorage කියවන්නේ client එකේ විතරයි (SSR/hydration ප්‍රශ්න නැති වෙන්න)
+  // sessionStorage is read on the client only (no SSR / hydration problem)
   useEffect(() => {
     setClientId(sessionStorage.getItem("user_id"));
   }, []);
 
-  // Token expire වුණොත් එක පාරක් refresh කරලා retry කරන helper
-  const withTokenRetry = async (fn) => {
-    try {
-      return await fn();
-    } catch (err) {
-      if (err?.status === 403 && err?.data?.message === "Access token expired") {
-        const refresh_token = localStorage.getItem("refresh_token");
-        if (!refresh_token) {
-          logoutUser();
-          throw err;
-        }
-        try {
-          const res = await refreshtoken(refresh_token).unwrap();
-          sessionStorage.setItem("access_token", res.access_token);
-        } catch (refreshError) {
-          console.error("Error refreshing token:", refreshError);
-          logoutUser();
-          throw refreshError;
-        }
-        return await fn();
-      }
-      throw err;
-    }
-  };
+  const withTokenRetry = run;   // one shared refresh-and-retry (authRetry.js)
 
   const fetchRolesForPage = useCallback(
     async (pageNumber, search = searchText) => {
@@ -133,7 +104,7 @@ export default function RoleList() {
       console.error("Error updating role status:", err);
       Swal.fire({
         title: "Error",
-        text: "Failed to update role status.",
+        text: err?.data?.message || "Failed to update role status.",
         icon: "error",
         confirmButtonText: "OK",
       });
@@ -145,91 +116,65 @@ export default function RoleList() {
     setShowModal(true);
   };
 
-  if (isLoading || loading) {
-    return (
-      <div className="d-flex justify-content-center my-4">
-        <Spinner animation="border" variant="primary" />
-      </div>
-    );
-  }
-
   return (
-    <ComponentContainerCard>
-      <div className="d-flex justify-content-between mb-3">
-        <h4>Role List</h4>
-        <div className="d-flex" style={{ gap: "5px" }}>
-          <Form.Control
-            type="text"
-            placeholder="Search by Role ID"
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && fetchRolesForPage(1)}
-            className="me-2"
-            style={{ maxWidth: "180px" }}
-          />
-          <Button variant="primary" onClick={() => fetchRolesForPage(1)}>
-            <Icon icon="material-symbols:search-rounded" width="24" height="20" /> Search
-          </Button>
+    <UmCard>
+      <div className="ul-bar">
+        <div className="um-title" style={{ margin: 0 }}>Role List</div>
+        <div className="ul-search">
+          <div className="au-wrap" style={{ flex: 1 }}>
+            <Icon icon="mdi:magnify" className="au-ico" width="19" height="19" />
+            <input
+              className="au-ctl"
+              type="text"
+              placeholder="Search by ID or name"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && fetchRolesForPage(1)}
+            />
+          </div>
+          <Button onClick={() => fetchRolesForPage(1)}>Search</Button>
         </div>
       </div>
 
-      {roles?.roles?.length > 0 ? (
+      {isLoading || loading ? (
+        <div className="d-flex justify-content-center my-4"><Spinner animation="border" variant="primary" /></div>
+      ) : roles?.roles?.length > 0 ? (
         <>
-          <Table striped bordered hover>
-            <thead className="table-light">
-              <tr>
-                <th>ID</th>
-                <th>Role Name</th>
-                <th>Status</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {roles.roles.map((role) => {
-                const isActive = role.status === "active";
-                return (
-                  <tr key={role.id}>
-                    <td>{role.id}</td>
-                    <td>{role.role_name}</td>
-                    <td>
-                      <span className={`badge ${isActive ? "bg-success" : "bg-danger"} text-white`}>
-                        {isActive ? "Active" : "Inactive"}
-                      </span>
-                    </td>
-                    <td className="d-flex">
-                      <Button
-                        variant={isActive ? "danger" : "success"}
-                        onClick={() => toggleStatus(role.id, role.status)}
-                        className="d-flex align-items-center gap-1"
-                        style={actionBtnStyle}
-                      >
-                        <Icon
-                          icon={isActive ? "mdi:account-off" : "mdi:account-check"}
-                          width={20}
-                          height={20}
-                        />
-                        <span style={{ fontSize: "0.75rem" }}>
-                          {isActive ? "Deactivate" : "Activate"}
-                        </span>
-                      </Button>
+          <div className="rl-grid">
+            {roles.roles.map((role) => {
+              const isActive = role.status === "active";
+              const isAdminRole = Number(role.id) === 1;
+              const count = Array.isArray(role.privileges) ? role.privileges.length : 0;
+              return (
+                <div className="rl-card" key={role.id}>
+                  <div className="rl-top">
+                    <div className="rl-ico"><Icon icon="mdi:shield-account-outline" width={22} height={22} /></div>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div className="rl-name">{role.role_name}</div>
+                      <div className="rl-meta">ID {role.id} · {count} privilege{count === 1 ? "" : "s"}</div>
+                    </div>
+                    <span className={`ul-pill ${isActive ? "on" : "off"}`}>{isActive ? "Active" : "Inactive"}</span>
+                  </div>
+                  <div className="ul-act" style={{ justifyContent: "flex-start" }}>
+                    <button type="button" className="ul-btn dark" onClick={() => openEditModal(role)}>
+                      <Icon icon="mdi:pencil-outline" width={18} height={18} /> Edit privileges
+                    </button>
+                    <button
+                      type="button"
+                      className={`ul-btn ${isActive ? "red" : "green"}`}
+                      disabled={isAdminRole}
+                      title={isAdminRole ? "The administrator role cannot be deactivated" : undefined}
+                      onClick={() => toggleStatus(role.id, role.status)}
+                    >
+                      <Icon icon={isActive ? "mdi:account-off-outline" : "mdi:account-check-outline"} width={18} height={18} /> {isActive ? "Deactivate" : "Activate"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
 
-                      <Button
-                        variant="primary"
-                        onClick={() => openEditModal(role)}
-                        className="d-flex align-items-center gap-1"
-                        style={actionBtnStyle}
-                      >
-                        <Icon icon="mdi:pencil" width={20} height={20} />
-                        <span style={{ fontSize: "0.75rem" }}>Edit Privilege</span>
-                      </Button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </Table>
-
-          <div className="d-flex justify-content-end">
+          <div className="d-flex justify-content-end mt-3">
             <Pagination>
               <Pagination.Prev
                 disabled={currentPage <= 1}
@@ -248,6 +193,6 @@ export default function RoleList() {
       )}
 
       <EditRole showModal={showModal} setShowModal={setShowModal} selectedRole={selectedRole} />
-    </ComponentContainerCard>
+    </UmCard>
   );
 }

@@ -4,8 +4,7 @@ import { useState } from "react";
 import { useForm, FormProvider } from "react-hook-form";
 import { yupResolver } from "@hookform/resolvers/yup";
 import * as yup from "yup";
-import { Button, Form } from "react-bootstrap";
-import ComponentContainerCard from "@/components/ComponentContainerCard";
+import { Button, Card, Form } from "react-bootstrap";
 import Swal from "sweetalert2";
 import { Icon } from "@iconify/react";
 import StageOneForm, { emptyVehicle, ANIM_MS } from "./StageOneForm";
@@ -59,6 +58,18 @@ const schema = yup.object({
     .matches(phoneRegex, { message: "Phone number must be between 10 and 11 digits", excludeEmptyString: true }),
   email: yup.string().trim().email("Invalid email"), // optional, but must be valid if filled
   profession: yup.string().trim(),
+  birthDate: yup
+    .string()
+    .test("birth", "Invalid birthday", (v) => !v || (/^\d{4}-\d{2}-\d{2}$/.test(v) && v <= new Date().toISOString().slice(0, 10) && v >= "1900-01-01")),
+  sourceId: yup.string(),
+  groupId: yup.string(),
+  sourceRequiresReferral: yup.boolean(),
+  referredByCode: yup
+    .string()
+    .trim()
+    .nullable(),
+  ownReferralCode: yup.string(),
+  loyaltyPoints: yup.mixed(),
   vehicles: yup.array().of(vehicleSchema).min(1, "Add at least one vehicle"),
 
   // Stage 2
@@ -67,7 +78,7 @@ const schema = yup.object({
   hrRemarks: yup.string().trim(),
   extraBenefits: yup.array().of(yup.object({ text: yup.string().trim() })),
 
-  // Stage 3 (checked manually when the job is started, so "Submit" in Stage 2 is not blocked)
+  // Stage 3 (checked manually when the job is started, so "Save" in Stage 2 is not blocked)
   consultantId: yup.string(),
   consultantName: yup.string(),
 });
@@ -78,9 +89,11 @@ const schema = yup.object({
 const BASE_STAGES = [
   {
     label: "Stage 1 · Add Customer",
+    short: "Customer",
+    icon: "mdi:account-plus-outline",
     parts: [
       {
-        fields: ["customerName", "nic", "companyName", "contactNumber", "altContactNumber", "email", "profession"],
+        fields: ["customerName", "nic", "companyName", "contactNumber", "altContactNumber", "email", "profession", "birthDate", "sourceId", "referredByCode"],
       },
       { fields: ["vehicles"] },
     ],
@@ -88,12 +101,16 @@ const BASE_STAGES = [
   },
   {
     label: "Stage 2 · Customer Category",
+    short: "Category",
+    icon: "mdi:shield-star-outline",
     parts: [{ fields: ["category", "hrRemarks", "extraBenefits"] }],
     Component: StageTwoCategory,
-    submitStage: true, // shows "Submit" and "Submit & Start Job" buttons
+    submitStage: true, // shows "Save" and "Save & Add Consultant" buttons
   },
   {
     label: "Stage 3 · Consultant",
+    short: "Consultant",
+    icon: "mdi:account-tie-outline",
     parts: [{ fields: ["consultantId"], required: [{ field: "consultantId", message: "Please select a consultant" }] }],
     Component: StageThreeConsultant,
   },
@@ -101,6 +118,13 @@ const BASE_STAGES = [
 
 const defaultValues = {
   customerId: "",
+  birthDate: "",
+  sourceId: "",
+  groupId: "",
+  sourceRequiresReferral: false,
+  referredByCode: "",
+  ownReferralCode: "",
+  loyaltyPoints: "",
   vehicles: [{ ...emptyVehicle }],
   category: "",
   categoryApprovalStatus: "",
@@ -119,7 +143,7 @@ export default function CustomerWizard({ onDone }) {
   const [submitting, setSubmitting] = useState(false);
   // Vehicles of the customer picked from the search box (offered in the Vehicle step)
   const [savedVehicles, setSavedVehicles] = useState([]);
-  // true after "Submit & Start Job": the customer is already saved, so earlier stages are locked
+  // true after "Save & Add Consultant": the customer is already saved, so earlier stages are locked
   const [customerSaved, setCustomerSaved] = useState(false);
   // Customer returned by the API after saving: { id, customerId, categoryApprovalStatus, vehicles }
   const [savedCustomer, setSavedCustomer] = useState(null);
@@ -196,13 +220,18 @@ export default function CustomerWizard({ onDone }) {
     onDone?.(result);
   };
 
-  // Stage 2: "Submit" (save only) or "Submit & Start Job" (save, then go to Stage 3)
+  // Stage 2: "Save" (save only) or "Save & Add Consultant" (save, then go to Stage 3)
   const saveCustomer = async (data, startJob) => {
     setSubmitting(true);
     try {
       // Saves the customer + vehicles (new customer, or update of one picked from the search box)
       const result = await addCustomer(data).unwrap();
       setSavedCustomer(result.customer);
+      methods.setValue("ownReferralCode", result.customer.referralCode || "");
+      methods.setValue("loyaltyPoints", result.customer.loyaltyPoints ?? 0);
+      const codeHtml = result.customer.referralCode
+        ? `<div class="mt-2">Referral code of this customer</div><div style="font-size:1.6rem;font-weight:800;letter-spacing:.1em;color:#111111">${result.customer.referralCode}</div>`
+        : "";
 
       if (startJob) {
         // Keep the ERP id in the form so the saved customer stays linked
@@ -210,10 +239,9 @@ export default function CustomerWizard({ onDone }) {
 
         await Swal.fire({
           title: "Customer saved!",
-          text: "Now select the consultant to start the job.",
+          html: `Now select the consultant to start the job.${codeHtml}`,
           icon: "success",
-          timer: 1500,
-          showConfirmButton: false,
+          confirmButtonText: "OK",
         });
         setCustomerSaved(true);
         setStep(2);
@@ -221,7 +249,7 @@ export default function CustomerWizard({ onDone }) {
       } else {
         await Swal.fire({
           title: "Success!",
-          text: result.message || "Customer saved successfully!",
+          html: `${result.message || "Customer saved successfully!"}${codeHtml}`,
           icon: "success",
           confirmButtonText: "OK",
         });
@@ -285,42 +313,60 @@ export default function CustomerWizard({ onDone }) {
   };
 
   return (
-    <ComponentContainerCard title="Customer Registration">
+    <Card className="border-0 shadow-sm">
+      <Card.Header className="d-flex align-items-center gap-2 text-white py-2 px-3 px-md-4" style={{ borderRadius: "0.375rem 0.375rem 0 0", background: "linear-gradient(135deg,#000000 0%,#1c1c1c 55%,#3d3d3d 100%)" }}>
+        <Icon icon="mdi:account-plus-outline" width="24" height="24" />
+        <span className="fw-bold fs-6">Customer Registration</span>
+      </Card.Header>
+      <Card.Body className="p-3">
       {/* Stepper + progress bar */}
-      <div className="d-flex align-items-center mb-4 overflow-x-auto pb-1">
-        {stages.map((s, i) => {
-          const done = i < step;
-          const active = i === step;
-          return (
-            <div key={s.label} className="d-flex align-items-center flex-fill">
-              <div className="d-flex flex-column align-items-center" style={{ minWidth: 90 }}>
-                <div
-                  className={`rounded-circle d-flex align-items-center justify-content-center fw-bold ${
-                    done || active ? "bg-primary text-white" : "bg-light text-muted border"
-                  }`}
-                  style={{ width: 36, height: 36, transition: "all 0.3s ease" }}
-                >
-                  {done ? <Icon icon="material-symbols:check-rounded" width="20" height="20" /> : i + 1}
-                </div>
-                <small
-                  className={`mt-1 text-center ${active ? "fw-bold text-primary" : "text-muted"}`}
-                  style={{ fontSize: "0.72rem" }}
-                >
-                  {s.label}
-                </small>
-              </div>
-
-              {i < stages.length - 1 && (
-                <div className="flex-fill bg-secondary-subtle rounded overflow-hidden" style={{ height: 4 }}>
+      <style>{`
+        .cw-step { transition: all .3s ease; }
+        .cw-actions { position: sticky; bottom: 0; z-index: 5; background: #fff; }
+        .cw-actions .btn { border-radius: 999px; padding: 0 28px; min-height: 48px; font-weight: 700; font-size: 1rem; display: inline-flex; align-items: center; gap: 6px; border: 0; transition: transform .12s, filter .15s, box-shadow .15s; }
+        .cw-actions .btn:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.12); }
+        .cw-actions .btn:disabled { opacity: .55; }
+        .cw-actions .cw-main, .cw-actions .cw-save, .cw-actions .cw-back { color: #fff; background: linear-gradient(135deg,#000000 0%,#1c1c1c 50%,#3d3d3d 100%); box-shadow: 0 8px 18px -8px rgba(0,0,0,.65), inset 0 -3px 0 #8a8a92; }
+        @media (max-width: 575.98px) {
+          .cw-actions .btn { padding: 10px 18px; }
+          .cw-step-label { display: none; }
+        }
+      `}</style>
+      <div className="rounded-4 px-3 py-2 mb-2" style={{ background: "#f8fafc", border: "1px solid #e5eaf1" }}>
+        <div className="d-flex align-items-center overflow-x-auto">
+          {stages.map((s, i) => {
+            const done = i < step;
+            const active = i === step;
+            return (
+              <div key={s.label} className="d-flex align-items-center flex-fill" style={{ minWidth: 0 }}>
+                <div className="d-flex align-items-center gap-2 flex-shrink-0">
                   <div
-                    className="bg-primary h-100"
-                    style={{ width: `${fillPercent(i)}%`, transition: "width 0.4s ease" }}
-                  />
+                    className="cw-step rounded-circle d-flex align-items-center justify-content-center fw-bold"
+                    style={{
+                      width: 34, height: 34,
+                      color: done || active ? "#fff" : "#94a3b8",
+                      background: done ? "#111111" : active ? "linear-gradient(135deg,#3d3d3d,#000000)" : "#fff",
+                      border: done || active ? "none" : "2px solid #e2e8f0",
+                      boxShadow: active ? "0 6px 16px -4px rgba(17,17,17,.45)" : "none",
+                    }}
+                  >
+                    {done ? <Icon icon="material-symbols:check-rounded" width="20" height="20" /> : <Icon icon={s.icon} width="20" height="20" />}
+                  </div>
+                  <div className="cw-step-label lh-sm">
+                    <div className="text-uppercase" style={{ fontSize: ".62rem", letterSpacing: ".12em", color: "#94a3b8" }}>Stage {i + 1}</div>
+                    <div className={active ? "fw-bold" : "fw-semibold"} style={{ fontSize: ".9rem", color: active ? "#111111" : done ? "#111111" : "#64748b" }}>{s.short}</div>
+                  </div>
                 </div>
-              )}
-            </div>
-          );
-        })}
+
+                {i < stages.length - 1 && (
+                  <div className="flex-fill rounded-pill overflow-hidden mx-3" style={{ height: 5, minWidth: 24, background: "#e2e8f0" }}>
+                    <div className="h-100 rounded-pill" style={{ width: `${fillPercent(i)}%`, background: "linear-gradient(90deg,#6b6b72,#111111)", transition: "width 0.4s ease" }} />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       <FormProvider {...methods}>
@@ -332,9 +378,10 @@ export default function CustomerWizard({ onDone }) {
             onSavedVehicles={setSavedVehicles}
           />
 
-          <div className="d-flex flex-wrap justify-content-between gap-2 mt-4">
+          <div className="cw-actions d-flex flex-wrap justify-content-between gap-2 mt-2 py-2 border-top">
             <Button
-              variant="secondary"
+              variant="light"
+              className="cw-back"
               onClick={back}
               disabled={(step === 0 && part === 0) || backLocked || busy}
             >
@@ -345,33 +392,36 @@ export default function CustomerWizard({ onDone }) {
               <div className="d-flex flex-wrap gap-2 justify-content-end">
                 <Button
                   variant="success"
+                  className="cw-save"
                   onClick={methods.handleSubmit((d) => saveCustomer(d, false))}
                   disabled={busy}
                 >
                   <Icon icon="material-symbols:check-circle-rounded" width="20" height="20" />{" "}
-                  {submitting ? "Saving..." : "Submit"}
+                  {submitting ? "Saving..." : "Save"}
                 </Button>
                 <Button
                   variant="primary"
+                  className="cw-main"
                   onClick={methods.handleSubmit((d) => saveCustomer(d, true))}
                   disabled={busy}
                 >
-                  <Icon icon="mdi:play-circle-outline" width="20" height="20" /> Submit &amp; Start Job
+                  <Icon icon="mdi:account-tie-outline" width="20" height="20" /> Save &amp; Add Consultant
                 </Button>
               </div>
             ) : isFinalStep ? (
-              <Button variant="success" onClick={startJob} disabled={busy}>
+              <Button variant="success" className="cw-save" onClick={startJob} disabled={busy}>
                 <Icon icon="mdi:play-circle-outline" width="20" height="20" />{" "}
                 {submitting ? "Starting..." : "Start Job"}
               </Button>
             ) : (
-              <Button variant="primary" onClick={next} disabled={busy}>
-                Next <Icon icon="material-symbols:arrow-forward-rounded" width="20" height="20" />
+              <Button variant="primary" className="cw-main" onClick={next} disabled={busy}>
+                Next <Icon icon="material-symbols:arrow-forward-rounded" width="22" height="22" />
               </Button>
             )}
           </div>
         </Form>
       </FormProvider>
-    </ComponentContainerCard>
+      </Card.Body>
+    </Card>
   );
 }

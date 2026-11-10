@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Alert, Badge, Button, Col, Form, FormControl, FormSelect, Row, Spinner } from "react-bootstrap";
 import { Icon } from "@iconify/react";
 import Swal from "sweetalert2";
@@ -13,6 +13,7 @@ import {
   useUpdateBayMutation,
   useUpdateTeamMutation,
 } from "@/store/features/apiSlice";
+import { usePermissions } from "./permissionsApi"; // action permissions
 
 // Teams and Bays of ONE department, managed together in one place (Add / Edit / Active-Inactive).
 // A team = name + leader + sub leader (optional) + members (optional). The people are HR employees.
@@ -49,6 +50,11 @@ export default function ManageTeamsBays({ departmentId: idProp, departmentName: 
   const [error, setError] = useState("");
 
   const isTeams = tab === "teams";
+  // team.manage -> teams, bay.manage -> bays. Without the permission the add / edit parts are not shown.
+  const { can, ready } = usePermissions();
+  const canTeams = can("team.manage"), canBays = can("bay.manage");
+  const canWrite = isTeams ? canTeams : canBays;
+  useEffect(() => { if (ready && !baysOnly && tab === "teams" && !canTeams && canBays) setTab("bays"); }, [ready, baysOnly, tab, canTeams, canBays]);
   const rows = (isTeams ? data?.teams : data?.bays) || [];
 
   /* ---------------- people pickers ---------------- */
@@ -200,7 +206,7 @@ export default function ManageTeamsBays({ departmentId: idProp, departmentName: 
       ) : (
         <>
           <div className={`d-flex gap-2 mb-3 ${baysOnly ? "d-none" : ""}`}>
-            {[["teams", "Teams", "mdi:account-group-outline", data?.teams?.length], ["bays", "Bays", "mdi:garage-variant", data?.bays?.length]].map(([key, text, icon, n]) => (
+            {[["teams", "Teams", "mdi:account-group-outline", data?.teams?.length], ["bays", "Bays", "mdi:garage-variant", data?.bays?.length]].filter(([key]) => (key === "teams" ? canTeams : canBays)).map(([key, text, icon, n]) => (
               <Button key={key} variant={tab === key ? "primary" : "outline-primary"} onClick={() => switchTab(key)}>
                 <Icon icon={icon} width="18" height="18" /> {text} {n !== undefined && <Badge bg={tab === key ? "light" : "primary"} text={tab === key ? "dark" : undefined} pill>{n}</Badge>}
               </Button>
@@ -210,7 +216,7 @@ export default function ManageTeamsBays({ departmentId: idProp, departmentName: 
           {error && <Alert variant="danger" className="py-2" dismissible onClose={() => setError("")}>{error}</Alert>}
 
           {/* Add / Edit form */}
-          <div className="border rounded-3 p-3 bg-white mb-3">
+          <div className={`border rounded-3 p-3 bg-white mb-3 ${canWrite ? "" : "d-none"}`}>
             <div className="fw-semibold small mb-2">{editId ? `Edit ${isTeams ? "team" : "bay"}` : `Add ${isTeams ? "team" : "bay"}`}</div>
             <Form noValidate onSubmit={(e) => { e.preventDefault(); save(); }}>
               {isTeams ? (
@@ -355,14 +361,16 @@ export default function ManageTeamsBays({ departmentId: idProp, departmentName: 
                   <Form.Check
                     type="switch"
                     id={`${tab}-${r.id}`}
-                    disabled={busy}
+                    disabled={busy || !canWrite}
                     checked={r.isActive}
                     onChange={(e) => toggleActive(r, e.target.checked)}
                     label={r.isActive ? "Active" : "Inactive"}
                   />
-                  <Button size="sm" variant="outline-secondary" onClick={() => startEdit(r)} disabled={busy}>
-                    <Icon icon="mdi:pencil-outline" width="16" height="16" /> Edit
-                  </Button>
+                  {canWrite && (
+                    <Button size="sm" variant="outline-secondary" onClick={() => startEdit(r)} disabled={busy}>
+                      <Icon icon="mdi:pencil-outline" width="16" height="16" /> Edit
+                    </Button>
+                  )}
                 </div>
               ))}
             </div>

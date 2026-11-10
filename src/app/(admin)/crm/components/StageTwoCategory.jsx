@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect } from "react";
 import { useFormContext, useFieldArray } from "react-hook-form";
 import { Alert, Badge, Button, Col, FormControl, FormLabel, Row, Spinner } from "react-bootstrap";
 import { Icon } from "@iconify/react";
@@ -9,7 +8,7 @@ import { useGetCustomerCategoriesQuery } from "@/store/features/apiSlice";
 // The category name IS the colour (Blue, Silver, Gold, Platinum).
 // Plain CSS names like "silver" / "gold" are too pale for text, so we use stronger shades for them.
 const NAME_COLORS = {
-  blue: "#2563eb",
+  blue: "#111111",
   silver: "#64748b",
   gold: "#d97706",
   platinum: "#7c3aed",
@@ -20,7 +19,7 @@ const colorFromName = (name) => {
   if (NAME_COLORS[n]) return NAME_COLORS[n];
   // Any other category named after a valid CSS colour (e.g. "Red", "Green") uses that colour directly
   if (typeof CSS !== "undefined" && CSS.supports("color", n)) return n;
-  return "#2563eb";
+  return "#111111";
 };
 
 // Pick an icon for a feature line coming from the DB
@@ -57,7 +56,6 @@ export default function StageTwoCategory() {
     register,
     control,
     watch,
-    setValue,
     formState: { errors },
   } = useFormContext();
 
@@ -74,13 +72,6 @@ export default function StageTwoCategory() {
   const selected = watch("category");
   const existingCustomerId = watch("customerId");
   const approvalStatus = watch("categoryApprovalStatus");
-
-  // Default: nothing selected yet -> select the first category (Blue)
-  useEffect(() => {
-    if (!selected && categories.length > 0) {
-      setValue("category", categories[0].name.toUpperCase(), { shouldDirty: false });
-    }
-  }, [categories, selected, setValue]);
 
   // Existing customer whose category is already APPROVED -> show only that category, no changes allowed
   const locked = Boolean(existingCustomerId && selected && approvalStatus === "APPROVED");

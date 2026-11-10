@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Badge, Button, Collapse, Form, FormControl, Modal, Spinner, Table } from "react-bootstrap";
+import { Alert, Badge, Button, Collapse, Form, FormControl, FormSelect, Modal, Spinner, Table } from "react-bootstrap";
 import { Icon } from "@iconify/react";
 import Swal from "sweetalert2";
 import {
@@ -10,19 +10,24 @@ import {
   useMarkClientListSentMutation,
   useSaveCustomerApprovalMutation,
   useSendApprovalLogisticsMutation,
+  useSendApprovalSmsMutation,
+  useSendClientPartsSmsMutation,
 } from "./customerApprovalApi";
+import { printHtml, savePdf } from "./estimatePdf";
+import { DEFAULT_COMPANY, termsHtml, useGetCompanyProfileQuery, useGetTermsQuery } from "./settingsApi";
 
 // Customer Approval (the stage after "Spare Part Review & Order").
 // Props: jobId, onHide, onSaved?({ jobId, stageCompleted })
 const UPLOAD_URL = `${process.env.NEXT_PUBLIC_BASE_URL}/file/upload`;
 const URL_FIX = ["https://i4i4.fra.idrivee2-52.com", "https://d8y1.c2.e2-9.dev"];
+// Switched off for now (set to true to show them again)
+const SHOW_ADD_AGREED_ITEM = false;   // "Add another agreed item" (department / repair type / new item with price)
+const SHOW_EXTRA_NOTE = false;        // "Extra note"
 const money = (n) => `Rs. ${Number(n || 0).toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const letter = (n) => String.fromCharCode(97 + (n % 26));
+// for now the estimate is only sent by SMS (the other ways can be added back here later)
 const VIA = [
-  ["WHATSAPP", "WhatsApp", "mdi:whatsapp"],
-  ["ERP", "ERP System", "mdi:monitor-dashboard"],
-  ["PHONE_CALL", "Recorded phone call", "mdi:phone-in-talk-outline"],
-  ["EMAIL", "Email", "mdi:email-outline"],
+  ["SMS", "SMS", "mdi:message-text-outline"],
 ];
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 // Same look as the spare parts quotation (KARUNARATHNE AUTO ZONE, maroon + gold)
@@ -72,10 +77,44 @@ const toWaNumber = (raw) => {
 };
 
 // One collapsible section: coloured icon, title, short summary and a done tick.
-function Card({ title, hint, right, children, icon = "mdi:clipboard-text-outline", color = "#2563eb", summary, done, defaultOpen = true }) {
+// estHours is stored as decimal hours (1.5 = 1 hr 30 min); the form shows Hours and Minutes separately
+const splitHM = (v) => { const t = Number(v) || 0; let h = Math.floor(t + 1e-6); let m = Math.round((t - h) * 60); if (m >= 60) { h += 1; m = 0; } return [h, m]; };
+const joinHM = (h, m) => { const t = Math.round(((Number(h) || 0) + (Number(m) || 0) / 60) * 10000) / 10000; return t > 0 ? String(t) : ""; };
+const fmtTime = (hours, days) => {
+  const [h, m] = splitHM(hours); const d = Number(days) || 0;
+  return [d > 0 ? `${d} Day${d === 1 ? "" : "s"}` : "", h > 0 ? `${h} Hrs` : "", m > 0 ? `${m} Min` : ""].filter(Boolean).join(" ");
+};
+
+// Time picker: big - / + buttons around the number, plus one-tap quick values
+function TimeStepper({ label, unit, icon, value, onChange, step, quick, disabled }) {
+  const n = value === "" || value === null || value === undefined ? 0 : Number(value) || 0;
+  const setN = (v) => { const x = Math.max(0, Math.round(v * 10) / 10); onChange(x === 0 ? "" : String(x)); };
+  return (
+    <div className="ts-box">
+      <div className="ts-label"><Icon icon={icon} width="18" height="18" /> {label}</div>
+      <div className="ts-row">
+        <button type="button" className="ts-btn" disabled={disabled || n <= 0} onClick={() => setN(n - step)} aria-label={`Decrease ${label}`}><Icon icon="mdi:minus" width="24" height="24" /></button>
+        <div className="ts-val">
+          <input type="number" inputMode="decimal" min="0" step={step} disabled={disabled} placeholder="0" value={value} onChange={(e) => onChange(e.target.value)} />
+          <span>{unit}</span>
+        </div>
+        <button type="button" className="ts-btn" disabled={disabled} onClick={() => setN(n + step)} aria-label={`Increase ${label}`}><Icon icon="mdi:plus" width="24" height="24" /></button>
+      </div>
+      <div className="ts-chips">
+        {quick.map((q) => (
+          <button key={q} type="button" disabled={disabled} className={`ts-chip ${n === q ? "on" : ""}`} onClick={() => setN(q)}>{q}</button>
+        ))}
+        <button type="button" disabled={disabled || n === 0} className="ts-chip clr" onClick={() => onChange("")}>Clear</button>
+      </div>
+    </div>
+  );
+}
+
+function Card({ title, hint, right, children, icon = "mdi:clipboard-text-outline", color: _sectionColor, summary, done, defaultOpen = true, anchor }) {
+  const color = "#c8102e"; // one theme colour for every section (black + red)
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="bg-white rounded-3 mb-3" style={{ border: "1px solid #e2e8f0", boxShadow: "0 1px 4px rgba(15,23,42,.07)", borderLeft: `4px solid ${color}` }}>
+    <div data-ca={anchor} className="bg-white rounded-3 mb-3" style={{ border: "1px solid #e2e8f0", boxShadow: "0 1px 4px rgba(15,23,42,.07)", borderLeft: `4px solid ${color}` }}>
       <div className="d-flex flex-wrap align-items-center gap-2 p-2 px-3" role="button" aria-expanded={open} onClick={() => setOpen(!open)}
         style={{ background: open ? `color-mix(in srgb, ${color} 7%, white)` : "#fff", borderRadius: open ? "0.45rem 0.45rem 0 0" : "0.45rem" }}>
         <span className="d-inline-flex align-items-center justify-content-center rounded-circle flex-shrink-0" style={{ width: 36, height: 36, color, background: `color-mix(in srgb, ${color} 14%, white)` }}>
@@ -121,15 +160,37 @@ export default function CustomerApprovalModal({ jobId, onHide, onSaved }) {
   const [complete, { isLoading: completing }] = useCompleteCustomerApprovalMutation();
   const [markSent] = useMarkClientListSentMutation();
   const [sendLogistics, { isLoading: sendingLogi }] = useSendApprovalLogisticsMutation();
+  const [sendSmsApi] = useSendApprovalSmsMutation();
+  const [sendPartsSms] = useSendClientPartsSmsMutation();
+  const [partsBusy, setPartsBusy] = useState(false);
 
   const [form, setForm] = useState(null);
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [smsBusy, setSmsBusy] = useState(false);
   const [manualDraft, setManualDraft] = useState({ description: "", amount: "" });
   const [scopeDraft, setScopeDraft] = useState("");
+  const [scopeDept, setScopeDept] = useState("");      // department of the "Add another agreed item" picker (empty = this department)
+  const [scopeParent, setScopeParent] = useState("");
+  const [scopePrice, setScopePrice] = useState("");
   const snapRef = useRef("");
   const fileRef = useRef(null);
 
+  // Show the problem in a SweetAlert; when it is closed, jump to the section that needs fixing (opens it if collapsed)
+  const problem = (msg, anchor) => {
+    setError(msg);
+    Swal.fire({ title: "Please check", text: msg, icon: "error", confirmButtonText: "OK, show me", confirmButtonColor: "#111" }).then(() => {
+      const el = document.querySelector(`.ca-modal [data-ca="${anchor}"]`);
+      if (!el) return;
+      const head = el.querySelector("[aria-expanded]");
+      if (head && head.getAttribute("aria-expanded") === "false") head.click();
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("ca-flash");
+      setTimeout(() => el.classList.remove("ca-flash"), 2500);
+      setTimeout(() => el.querySelector("input:not([type=hidden]):not([disabled]), textarea")?.focus?.({ preventScroll: true }), 450);
+    });
+  };
   const fail = (ex, fb) => Swal.fire({ title: "Failed", text: ex?.data?.message || ex?.message || fb, icon: "error" });
   const job = data?.job, ctx = data?.context, saved = data?.saved;
   const readOnly = data && !data.canRecord;
@@ -140,51 +201,99 @@ export default function CustomerApprovalModal({ jobId, onHide, onSaved }) {
     const s = data.saved;
     const f = {
       estHours: s.estHours ?? "", estDays: s.estDays ?? "", includeSpareParts: s.includeSpareParts, includeLabour: s.includeLabour,
-      manualItems: s.manualItems || [], washOptionIds: (s.washItems || []).map((w) => w.optionId), sentVia: s.sentVia || [],
+      manualItems: [], washOptionIds: [], sentVia: (s.sentVia || []).filter((v) => v === "SMS"),
       decision: s.decision, agreedScope: s.agreedScope || [], extraNote: s.extraNote || "", partsBy: s.partsBy,
-      clientPartsFiles: s.clientPartsFiles || [], thirdPartyNote: s.thirdPartyNote || "",
+      clientPartsFiles: s.clientPartsFiles || [], clientParts: s.clientParts || [], thirdPartyNote: s.thirdPartyNote || "",
     };
     setForm(f); snapRef.current = JSON.stringify(f);
   }, [data, form]);
 
+  // what goes into the estimate sent to the customer (all selected by default, each can be removed)
+  // "Did you receive the customer's confirmation?" - until it is Yes the confirmation / spare parts / final estimate sections are muted
+  const [replyYes, setReplyYes] = useState(null);
+  const { data: companyData } = useGetCompanyProfileQuery();   // Settings > Company profile (name + logo on the documents)
+  const company = { ...DEFAULT_COMPANY, ...(companyData?.company || {}) };
+  const { data: termsData } = useGetTermsQuery();   // Settings > Terms & conditions (printed on the estimate)
+  const [viewEst, setViewEst] = useState(null);   // estimate preview: null | "full" | "agreed"
+  const [sendSel, setSendSel] = useState({ labour: true, parts: true, time: true });
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
   const toggle = (key, v) => setForm((f) => ({ ...f, [key]: f[key].includes(v) ? f[key].filter((x) => x !== v) : [...f[key], v] }));
 
   // ---- live estimate ----
-  const calc = useMemo(() => {
-    if (!form || !ctx) return { spare: 0, labour: 0, manual: 0, repair: 0, wash: 0, total: 0 };
-    const spare = form.includeSpareParts ? ctx.sparePartsValue : 0;
-    const labour = form.includeLabour ? ctx.labourTotal : 0;
+  const computeCalc = (form) => {
+    if (!form || !ctx) return { spare: 0, labour: 0, manual: 0, repair: 0, markup: 0, pct: 0, wash: 0, total: 0, spareAll: 0, labourAll: 0 };
+    // by what the customer agreed: "Agreed scope only" counts only the ticked repair items; spare parts the customer brings are not charged
+    const keyOf = (l) => l.repairType || l.description;
+    const labourLines = ctx.labour.filter((l) => !l.warrantyClaim && (form.decision !== "PARTIAL" || form.agreedScope.includes(keyOf(l))));
+    const partLines = ctx.parts.filter((p) => !p.warrantyClaim && !(form.partsBy === "CLIENT" && form.clientParts.includes(p.id)));
+    const spareBase = partLines.reduce((s, r) => s + r.qty * r.unitPrice, 0) + ctx.quotes.reduce((s, q) => s + q.quotedPrice, 0);
+    const labourBase = labourLines.reduce((s, r) => s + (r.amount || 0), 0);
+    const spare = form.includeSpareParts ? spareBase : 0;
+    const labour = form.includeLabour ? labourBase : 0;
     const manual = form.manualItems.reduce((s, m) => s + (Number(m.amount) || 0), 0);
     const wash = ctx.washOptions.filter((o) => form.washOptionIds.includes(o.id)).reduce((s, o) => s + o.price, 0);
-    return { spare, labour, manual, repair: labour + manual, wash, total: spare + labour + manual + wash };
-  }, [form, ctx]);
+    // price adjustment (markup %) chosen in the Vehicle Job Inspection: added on spare parts + cost for repair (not on wash)
+    const pct = Number(ctx.markupPercent) || 0;
+    // the % is added to the unit price of each line: markup of a line = qty x (unit price + % - unit price)
+    const lineAdj = (q, u) => Math.round((Number(q) || 0) * (Math.round((Number(u) || 0) * (100 + pct)) / 100 - (Number(u) || 0)) * 100) / 100;
+    const spareMkAll = partLines.reduce((s, r) => s + lineAdj(r.qty, r.unitPrice), 0) + ctx.quotes.reduce((s, q) => s + lineAdj(1, q.quotedPrice), 0);
+    const labourMkAll = labourLines.reduce((s, r) => s + lineAdj(r.qty || 1, r.unitPrice ?? r.amount), 0);
+    const spareMk = form.includeSpareParts ? spareMkAll : 0;
+    const labourMk = form.includeLabour ? labourMkAll : 0;
+    const markup = Math.round((spareMk + labourMk + form.manualItems.reduce((s, m) => s + lineAdj(1, m.amount), 0)) * 100) / 100;
+    return { spare, labour, manual, repair: labour + manual, markup, pct, wash, total: spare + labour + manual + markup + wash,
+      spareAll: Math.round((spareBase + spareMkAll) * 100) / 100, labourAll: Math.round((labourBase + labourMkAll) * 100) / 100 };
+  };
+  const calc = useMemo(() => computeCalc(form), [form, ctx]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The estimate sent to the customer BEFORE the confirmation: every repair selected in the Vehicle Job Inspection and every spare part (no agreement applied yet)
+  const fullOf = (f) => (f ? { ...f, decision: null, agreedScope: [], partsBy: null, clientParts: [], includeSpareParts: sendSel.parts, includeLabour: sendSel.labour } : f);
+  const calcFull = useMemo(() => computeCalc(fullOf(form)), [form, ctx, sendSel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const dirty = form && JSON.stringify(form) !== snapRef.current;
   const payload = () => ({
     jobId, estHours: form.estHours === "" ? null : Number(form.estHours), estDays: form.estDays === "" ? null : Number(form.estDays),
     includeSpareParts: form.includeSpareParts, includeLabour: form.includeLabour, manualItems: form.manualItems,
     washOptionIds: form.washOptionIds, sentVia: form.sentVia, decision: form.decision, agreedScope: form.agreedScope,
-    extraNote: form.extraNote, partsBy: form.partsBy, clientPartsFiles: form.clientPartsFiles,
+    extraNote: form.extraNote, partsBy: form.partsBy, clientPartsFiles: form.clientPartsFiles, clientParts: form.clientParts,
     thirdPartyRequest: Boolean(saved?.thirdPartyRequest), thirdPartyNote: form.thirdPartyNote,
   });
   const doSave = async () => {
     await save(payload()).unwrap();
     snapRef.current = JSON.stringify(form);
   };
+  // Auto-save: ~1.5 s after the last change the form is saved (a failed auto-save stays quiet: Save / the close question still work)
+  const [autoState, setAutoState] = useState("");   // "" | "pending" | "saving" | "saved" | "failed"
+  const autoBusy = useRef(false);
+  const formKey = form ? JSON.stringify(form) : null;
+  useEffect(() => {
+    if (!data || !form || readOnly || formKey === null || formKey === snapRef.current) return undefined;
+    setAutoState("pending");
+    const t = setTimeout(async () => {
+      if (autoBusy.current) return;
+      autoBusy.current = true;
+      setAutoState("saving");
+      try { await save(payload()).unwrap(); snapRef.current = formKey; setAutoState("saved"); }
+      catch (_) { setAutoState("failed"); }
+      finally { autoBusy.current = false; }
+    }, 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formKey, readOnly, !!data]);
+
   const saveClick = async () => {
     setError("");
-    try { await doSave(); Swal.fire({ title: "Saved", icon: "success", timer: 900, showConfirmButton: false }); } catch (ex) { setError(ex?.data?.message || "Could not save."); }
+    try { await doSave(); Swal.fire({ title: "Saved", icon: "success", timer: 900, showConfirmButton: false }); } catch (ex) { problem(ex?.data?.message || "Could not save.", "time"); }
   };
 
   const finish = async () => {
     setError("");
-    if (!form.estHours && !form.estDays) return setError("Enter the estimated time of repair.");
-    if (form.sentVia.length === 0) return setError("Select how the estimation was sent.");
-    if (!form.decision) return setError("Select the customer confirmation.");
-    if (form.decision === "PARTIAL" && form.agreedScope.length === 0) return setError("Write the agreed scope.");
-    if (!form.partsBy) return setError("Select who provides the spare parts.");
-    if (form.partsBy === "CLIENT" && form.clientPartsFiles.length === 0) return setError("Upload the spare part list of the customer.");
+    if (!form.estHours && !form.estDays) return problem("Enter the estimated time of repair.", "time");
+    if (!(replyYes ?? Boolean(form.decision))) return problem("Answer \"Did you receive the customer's confirmation?\" with Yes first.", "reply");
+    // sending the estimate by SMS is optional: the stage can be completed without it
+    if (!form.decision) return problem("Select the customer confirmation.", "decision");
+    if (form.decision === "PARTIAL" && form.agreedScope.length === 0) return problem("Tick the repair items the customer agreed to.", "decision");
+    if (!form.partsBy) return problem("Select who provides the spare parts.", "parts");
+    if (form.partsBy === "CLIENT" && form.clientParts.length === 0 && form.clientPartsFiles.length === 0) return problem("Tick the spare parts the customer brings.", "parts");
     const ok = await Swal.fire({ title: "Complete Customer Approval?", text: `${job.jobNo} moves to the next stage. This form can no longer be changed.`, icon: "question", showCancelButton: true, confirmButtonText: "Complete" });
     if (!ok.isConfirmed) return;
     try {
@@ -193,7 +302,7 @@ export default function CustomerApprovalModal({ jobId, onHide, onSaved }) {
       await Swal.fire({ title: "Done!", icon: "success", timer: 1200, showConfirmButton: false });
       onSaved?.({ jobId, stageCompleted: Boolean(r.stageCompleted) });
       onHide();
-    } catch (ex) { setError(ex?.data?.message || "Could not complete the stage."); }
+    } catch (ex) { problem(ex?.data?.message || "Could not complete the stage.", "decision"); }
   };
 
   const tryClose = async () => {
@@ -205,12 +314,20 @@ export default function CustomerApprovalModal({ jobId, onHide, onSaved }) {
 
   // ---- manual lines / agreed scope ----
   const addManual = () => {
-    if (!manualDraft.description.trim()) return setError("Write the description of the line.");
+    if (!manualDraft.description.trim()) return problem("Write the description of the line.", "estimate");
     const amt = Number(manualDraft.amount || 0);
-    if (!Number.isFinite(amt) || amt < 0) return setError("Enter a valid amount.");
+    if (!Number.isFinite(amt) || amt < 0) return problem("Enter a valid amount.", "estimate");
     setError(""); set({ manualItems: [...form.manualItems, { description: manualDraft.description.trim(), amount: amt }] }); setManualDraft({ description: "", amount: "" });
   };
-  const addScope = () => { const t = scopeDraft.trim(); if (!t) return; set({ agreedScope: [...form.agreedScope, t] }); setScopeDraft(""); };
+  // a new agreed item typed here: saved as text, with the price in brackets when given ("Item (Rs. 1,500.00)")
+  const addScope = () => {
+    const t = scopeDraft.trim(); if (!t) return;
+    const price = Number(scopePrice);
+    if (scopePrice !== "" && !(price >= 0)) return Swal.fire({ title: "Please check", text: "Enter a valid price.", icon: "error" });
+    const text = scopePrice !== "" ? `${t} (${money(price)})` : t;
+    if (!form.agreedScope.includes(text)) set({ agreedScope: [...form.agreedScope, text] });
+    setScopeDraft(""); setScopePrice("");
+  };
 
   // ---- customer's spare part list ----
   const onFile = async (e) => {
@@ -227,16 +344,46 @@ export default function CustomerApprovalModal({ jobId, onHide, onSaved }) {
     } catch (ex) { fail(ex, "Upload failed"); } finally { setUploading(false); }
   };
   const sendToCustomer = async () => {
-    if (form.clientPartsFiles.length === 0) return setError("Upload the spare part list first.");
+    if (form.clientParts.length === 0) return problem("Tick the spare parts the customer brings first.", "parts");
     setError("");
     try {
       await doSave();
-      const text = `Spare part list for ${job.regNo} (${job.jobNo}):\n${form.clientPartsFiles.map((f) => f.url).join("\n")}`;
-      const phone = toWaNumber(job.contactNumber);
-      if (phone) window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, "_blank", "noopener");
-      await markSent(jobId).unwrap();
-      if (!phone) Swal.fire({ title: "Recorded", text: "The customer has no mobile number, so WhatsApp was not opened. Send the list manually.", icon: "info" });
+      const phone = await askPhone("Send the spare parts report link by SMS");
+      if (phone === null) return;
+      const r = await sendPartsSms({ jobId, phone }).unwrap();
+      if (r.sms?.sent) Swal.fire({ title: "SMS sent", text: r.sms.to ? `The spare parts report link was sent to ${r.sms.to}` : "The customer got the link.", icon: "success", timer: 2000, showConfirmButton: false });
+      else Swal.fire({ title: "SMS not sent", text: r.sms?.error || "Could not send the SMS.", icon: "error" });
     } catch (ex) { fail(ex, "Could not send."); }
+  };
+
+  // ---- The spare parts report (the parts the customer brings): same look as the estimate; downloaded as a PDF ----
+  const downloadPartsReport = async () => {
+    const chosen = ctx.parts.filter((p) => form.clientParts.includes(p.id));
+    if (chosen.length === 0) return problem("Tick the spare parts the customer brings first.", "parts");
+    const logo = company.logoUrl || `${window.location.origin}/images/mainlogo.jpeg`;
+    const today = new Date().toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+    const R = 'style="text-align:right"';
+    const qty = chosen.reduce((t, p) => t + (Number(p.qty) || 0), 0);
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Spare parts report ${esc(job.jobNo)}</title><style>${DOC_CSS}</style></head><body><div class="page">
+<div class="top">
+  <div style="display:flex;align-items:center;gap:12px"><img src="${logo}" alt="" onerror="this.style.display='none'"/><div class="brandname">${esc(company.name)}</div></div>
+  <div class="doc"><div class="t">Spare parts report</div><div class="s">Parts provided by the customer</div></div>
+</div><div class="gold"></div>
+<dl class="meta">
+  <div><dt>Job</dt><dd>${esc(job.jobNo)}</dd></div>
+  <div><dt>Customer</dt><dd>${esc(job.customerName)}</dd></div>
+  <div><dt>Vehicle no</dt><dd>${esc(job.regNo)}</dd></div>
+  <div><dt>Date</dt><dd>${today}</dd></div>
+</dl>
+<div class="note" style="margin-top:6px">Department: ${esc(job.departmentName)} · Please bring the spare parts listed below to the workshop.</div>
+<h2>Spare parts to bring</h2>
+<table><thead><tr><th class="c" style="color:#fff">#</th><th>Spare part</th><th>Brand</th><th>Quality</th><th ${R}>Qty</th></tr></thead><tbody>${chosen.map((p, n) => `<tr><td class="c">${n + 1}</td><td><b>${esc(p.name)}</b></td><td>${esc(p.brand || "-")}</td><td>${esc(p.quality || "-")}</td><td ${R}><b>${p.qty}</b></td></tr>`).join("")}</tbody></table>
+<div class="sum"><div class="g"><span>${chosen.length} item(s)</span><span>Total qty ${qty}</span></div></div>
+<div class="sign"><div>Prepared by</div><div>Customer</div></div>
+<div class="foot">${esc(company.name)} · Thank you for choosing us</div>
+</div></body></html>`;
+    setPartsBusy(true);
+    try { await savePdf(html, `Spare-parts-${job.jobNo}`); } finally { setPartsBusy(false); }
   };
 
   // ---- Logistic & Stock ----
@@ -249,24 +396,34 @@ export default function CustomerApprovalModal({ jobId, onHide, onSaved }) {
     } catch (ex) { fail(ex, "Could not send the request."); }
   };
 
-  // ---- Download the estimate (print / "Save as PDF") ----
-  const downloadEstimate = () => {
-    const logo = `${window.location.origin}/images/mainlogo.jpeg`;
+  // ---- The estimate document (shared by Download PDF and Print) ----
+  const buildEstimateHtml = (full = false) => {
+    const F = full ? fullOf(form) : form;
+    const C = full ? calcFull : calc;
+    const logo = company.logoUrl || `${window.location.origin}/images/mainlogo.jpeg`;
     const today = new Date().toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
     const R = 'style="text-align:right"';
-    const washSel = ctx.washOptions.filter((o) => form.washOptionIds.includes(o.id));
+    const washSel = ctx.washOptions.filter((o) => F.washOptionIds.includes(o.id));
+    // only what the customer agreed: the ticked repair items ("Agreed scope only"), and not the spare parts the customer brings himself
+    const keyOf = (l) => l.repairType || l.description;
+    const ownParts = F.partsBy === "CLIENT" ? ctx.parts.filter((p) => F.clientParts.includes(p.id)) : [];
+    const docParts = ctx.parts.filter((p) => !ownParts.includes(p));
+    const docLabour = ctx.labour.filter((l) => F.decision !== "PARTIAL" || F.agreedScope.includes(keyOf(l)));
+    // prices as in the Vehicle Job Inspection: the price adjustment % is already inside each unit price
+    const adjU = (u) => Math.round((Number(u) || 0) * (100 + C.pct)) / 100;
+    const WC = '<b style="color:#15803d">Warranty claim</b>';
     const partRows = [
-      ...ctx.parts.map((p, n) => `<tr><td class="c">${n + 1}</td><td><b>${esc(p.name)}</b></td><td>${esc(p.brand || "-")}</td><td ${R}>${p.qty}</td><td ${R}>${money(p.unitPrice)}</td><td ${R}><b>${money(p.qty * p.unitPrice)}</b></td></tr>`),
-      ...ctx.quotes.map((q, n) => `<tr><td class="c">${ctx.parts.length + n + 1}</td><td><b>${esc(q.description)}</b> (third party)</td><td>-</td><td ${R}>1</td><td ${R}>${money(q.quotedPrice)}</td><td ${R}><b>${money(q.quotedPrice)}</b></td></tr>`),
+      ...docParts.map((p, n) => `<tr><td class="c">${n + 1}</td><td><b>${esc(p.name)}</b></td><td>${esc(p.brand || "-")}</td><td ${R}>${p.qty}</td><td ${R}>${p.warrantyClaim ? `<s>${money(adjU(p.unitPrice))}</s>` : money(adjU(p.unitPrice))}</td><td ${R}>${p.warrantyClaim ? WC : `<b>${money(p.qty * adjU(p.unitPrice))}</b>`}</td></tr>`),
+      ...ctx.quotes.map((q, n) => `<tr><td class="c">${docParts.length + n + 1}</td><td><b>${esc(q.description)}</b> (third party)</td><td>-</td><td ${R}>1</td><td ${R}>${money(adjU(q.quotedPrice))}</td><td ${R}><b>${money(adjU(q.quotedPrice))}</b></td></tr>`),
     ].join("");
     const labourRows = [
-      ...(form.includeLabour ? ctx.labour.map((l) => `<tr><td>${esc(l.description)}</td><td ${R}>${money(l.amount)}</td></tr>`) : []),
-      ...form.manualItems.map((m) => `<tr><td>${esc(m.description)}</td><td ${R}>${money(m.amount)}</td></tr>`),
+      ...(F.includeLabour ? docLabour.map((l) => `<tr><td>${esc(l.description)}${(l.qty || 1) > 1 ? ` × ${l.qty}` : ""}</td><td ${R}>${l.warrantyClaim ? WC : money((l.qty || 1) * adjU(l.unitPrice ?? l.amount))}</td></tr>`) : []),
+      ...F.manualItems.map((m) => `<tr><td>${esc(m.description)}</td><td ${R}>${money(m.amount)}</td></tr>`),
     ].join("");
-    const time = [form.estHours ? `${form.estHours} Hrs` : "", form.estDays ? `${form.estDays} Days` : ""].filter(Boolean).join(" / ") || "-";
+    const time = (full && !sendSel.time) ? "-" : (fmtTime(F.estHours, F.estDays) || "-");
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Estimate ${esc(job.jobNo)}</title><style>${DOC_CSS}</style></head><body><div class="page">
 <div class="top">
-  <div style="display:flex;align-items:center;gap:12px"><img src="${logo}" alt="" onerror="this.style.display='none'"/><div class="brandname">KARUNARATHNE AUTO ZONE</div></div>
+  <div style="display:flex;align-items:center;gap:12px"><img src="${logo}" alt="" onerror="this.style.display='none'"/><div class="brandname">${esc(company.name)}</div></div>
   <div class="doc"><div class="t">Estimate</div><div class="s">Repair estimation</div></div>
 </div><div class="gold"></div>
 <dl class="meta">
@@ -276,20 +433,47 @@ export default function CustomerApprovalModal({ jobId, onHide, onSaved }) {
   <div><dt>Date</dt><dd>${today}</dd></div>
 </dl>
 <div class="note" style="margin-top:6px">Department: ${esc(job.departmentName)} · Estimated time of repair: <b>${esc(time)}</b> (including spare parts availability)</div>
-${form.includeSpareParts && partRows ? `<h2>Spare parts</h2><table><thead><tr><th class="c" style="color:#fff">#</th><th>Item</th><th>Brand</th><th ${R}>Qty</th><th ${R}>Unit price</th><th ${R}>Total</th></tr></thead><tbody>${partRows}</tbody></table>` : ""}
-${labourRows ? `<h2>Repair &amp; labour</h2>${form.includeLabour && ctx.rootCauses.length ? `<p class="note"><b>Root causes:</b> ${ctx.rootCauses.map(esc).join("; ")}</p>` : ""}<table><thead><tr><th>Work</th><th ${R}>Amount</th></tr></thead><tbody>${labourRows}</tbody></table>` : ""}
+${ownParts.length ? `<p class="note"><b>Spare parts provided by the customer (not charged):</b> ${ownParts.map((p) => `${esc(p.name)} × ${p.qty}`).join("; ")}</p>` : ""}
+${F.decision === "PARTIAL" ? `<p class="note"><b>Agreed scope only</b></p>` : ""}
+${F.includeSpareParts && partRows ? `<h2>Spare parts</h2><table><thead><tr><th class="c" style="color:#fff">#</th><th>Item</th><th>Brand</th><th ${R}>Qty</th><th ${R}>Unit price</th><th ${R}>Total</th></tr></thead><tbody>${partRows}</tbody></table>` : ""}
+${labourRows ? `<h2>Repair &amp; labour</h2>${F.includeLabour && ctx.rootCauses.length ? `<p class="note"><b>Root causes:</b> ${ctx.rootCauses.map(esc).join("; ")}</p>` : ""}<table><thead><tr><th>Work</th><th ${R}>Amount</th></tr></thead><tbody>${labourRows}</tbody></table>` : ""}
 ${washSel.length ? `<h2>Wash</h2><table><thead><tr><th>Wash type</th><th ${R}>Price</th></tr></thead><tbody>${washSel.map((o) => `<tr><td>${esc(o.group ? `${o.group} > ${o.name}` : o.name)}</td><td ${R}>${money(o.price)}</td></tr>`).join("")}</tbody></table>` : ""}
-<div class="sum"><div><span>Spare parts</span><b>${money(calc.spare)}</b></div><div><span>Cost for repair</span><b>${money(calc.repair)}</b></div><div><span>Wash</span><b>${money(calc.wash)}</b></div><div class="g"><span>Estimated total</span><span>${money(calc.total)}</span></div></div>
+<div class="sum"><div><span>Spare parts</span><b>${money(F.includeSpareParts ? C.spareAll : 0)}</b></div><div><span>Cost for repair</span><b>${money((F.includeLabour ? C.labourAll : 0) + C.manual)}</b></div>${C.wash > 0 ? `<div><span>Wash</span><b>${money(C.wash)}</b></div>` : ""}<div class="g"><span>Estimated total</span><span>${money(C.total)}</span></div></div>
+${termsHtml(termsData?.terms?.estimate)}
 <div class="sign"><div>Prepared by</div><div>Customer approval</div></div>
-<div class="foot">KARUNARATHNE AUTO ZONE · Thank you for choosing us</div>
+<div class="foot">${esc(company.name)} · Thank you for choosing us</div>
 </div>
-<script>
-(function(){var done=false;function go(){if(done)return;done=true;window.print()}
-var im=document.images[0];if(!im||im.complete){setTimeout(go,150)}else{im.onload=go;im.onerror=go;setTimeout(go,2500)}})();
-<\/script></body></html>`;
-    const w = window.open("", "_blank");
-    if (!w) return Swal.fire({ title: "Pop-up blocked", text: "Allow pop-ups to download the estimate.", icon: "info" });
-    w.document.open(); w.document.write(html); w.document.close();
+</body></html>`;
+    return html;
+  };
+  // Download = saves a PDF straight away;  Print = opens the print window
+  const downloadEstimate = async (full = false) => { setPdfBusy(true); try { await savePdf(buildEstimateHtml(full), `Estimate-${job.jobNo}`); } finally { setPdfBusy(false); } };
+  const printEstimate = (full = false) => printHtml(buildEstimateHtml(full));
+  // Asks which mobile number the SMS goes to (the customer's number is filled in; it can be changed). Returns the number, or null when cancelled.
+  const askPhone = async (title) => {
+    const r = await Swal.fire({
+      title, input: "tel", inputLabel: "Mobile number (07XXXXXXXX)", inputValue: job.contactNumber || "", inputPlaceholder: "07XXXXXXXX",
+      showCancelButton: true, confirmButtonText: "Send SMS",
+      inputValidator: (v) => (/^(?:\+?94|0)?7\d{8}$/.test(String(v).replace(/[\s-]/g, "")) ? undefined : "Enter a valid mobile number (07XXXXXXXX)"),
+    });
+    return r.isConfirmed ? String(r.value).replace(/[\s-]/g, "") : null;
+  };
+
+  // Send via SMS: the customer gets the estimate total (and the repair time) by SMS
+  const sendEstimateSms = async (full = false) => {
+    const tot = full ? calcFull.total : calc.total;
+    if (!(tot > 0)) return Swal.fire({ title: "Nothing to send", text: "The estimate total is Rs. 0.00.", icon: "info" });
+    const phone = await askPhone(`Send the estimate (${money(tot)}) by SMS`);
+    if (phone === null) return;
+    setSmsBusy(true);
+    try {
+      const r = await sendSmsApi({ jobId, phone, full: full || undefined, includeSpareParts: full ? sendSel.parts : form.includeSpareParts, includeLabour: full ? sendSel.labour : form.includeLabour, time: (full && !sendSel.time) ? undefined : (fmtTime(form.estHours, form.estDays) || undefined) }).unwrap();
+      if (r.sms?.sent) {
+        set({ sentVia: ["SMS"] });
+        Swal.fire({ title: "SMS sent", text: r.sms.to ? `Sent to ${r.sms.to}` : "The customer got the estimate.", icon: "success", timer: 1800, showConfirmButton: false });
+      } else Swal.fire({ title: "SMS not sent", text: r.sms?.error || "Could not send the SMS.", icon: "error" });
+    } catch (ex) { fail(ex, "Could not send the SMS."); }
+    finally { setSmsBusy(false); }
   };
 
   // Wash types: parents in a dropdown; a parent with child types shows its children, a parent without children is picked directly
@@ -322,199 +506,269 @@ var im=document.images[0];if(!im||im.complete){setTimeout(go,150)}else{im.onload
     return (
       <>
         {/* Job strip */}
-        <div className="bg-white rounded-3 p-3 mb-3 d-flex flex-wrap gap-4 align-items-center" style={{ border: "1px solid #e2e8f0" }}>
-          <div><div className="small text-muted">Job</div><div className="fw-bold">{job.jobNo}</div></div>
-          <div><div className="small text-muted">Vehicle</div><div className="fw-bold">{job.regNo}</div></div>
+        <div className="bg-white rounded-3 p-3 mb-3 d-flex flex-wrap gap-4 align-items-center" style={{ border: "1px solid #e3e3e6", borderLeft: "5px solid #c8102e", boxShadow: "0 4px 14px -10px rgba(15,23,42,.45)" }}>
+          <div><div className="small text-muted">Job</div><span className="ca-jobno">{job.jobNo}</span></div>
+          <div><div className="small text-muted">Vehicle</div><span className="ca-plate">{job.regNo}</span></div>
           <div><div className="small text-muted">Customer</div><div className="fw-bold">{job.customerName}</div></div>
-          <div className="ms-auto text-end"><div className="small text-muted">Estimated total</div><div className="fs-5 fw-bold" style={{ color: "#16a34a" }}>{money(calc.total)}</div></div>
+          <div className="ms-auto text-end"><div className="small text-muted">Estimated total</div><div className="fs-5 fw-bold" style={{ color: "#c8102e" }}>{money(calc.total)}</div></div>
         </div>
         {readOnly && <Alert variant="info" className="py-2">{saved.completedAt ? "This stage is completed. The form is read only." : "This job has not reached this stage yet."}</Alert>}
 
         {/* a. Estimated time */}
-        <Card title="Estimated Time of Repair" icon="mdi:timer-outline" color="#0891b2" hint="Including spare parts availability"
-          done={Boolean(form.estHours || form.estDays)} summary={form.estHours || form.estDays ? `${form.estHours || 0} Hrs / ${form.estDays || 0} Days` : null}>
-          <div className="row g-2" style={{ maxWidth: 440 }}>
-            <div className="col-6"><div className="input-group"><FormControl type="number" min="0" step="0.5" disabled={readOnly} placeholder="0" value={form.estHours} onChange={(e) => set({ estHours: e.target.value })} /><span className="input-group-text">Hrs</span></div></div>
-            <div className="col-6"><div className="input-group"><FormControl type="number" min="0" step="0.5" disabled={readOnly} placeholder="0" value={form.estDays} onChange={(e) => set({ estDays: e.target.value })} /><span className="input-group-text">Days</span></div></div>
+        <Card anchor="time" title="Estimated Time of Repair" icon="mdi:timer-outline" color="#0891b2" hint="Including spare parts availability"
+          done={Boolean(form.estHours || form.estDays)} summary={form.estHours || form.estDays ? fmtTime(form.estHours, form.estDays) : null}>
+          <style>{`
+            .ts-box { background: #fafafa; border: 1.5px solid #e3e3e6; border-radius: 14px; padding: 12px 14px; height: 100%; }
+            .ts-label { font-weight: 700; color: #111; display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+            .ts-label svg { color: #c8102e; }
+            .ts-row { display: flex; align-items: stretch; gap: 8px; }
+            .ts-btn { width: 52px; min-height: 52px; border-radius: 12px; border: 0; color: #fff; background: linear-gradient(135deg,#000000 0%,#1c1c1c 50%,#3d3d3d 100%); box-shadow: inset 0 -3px 0 #c8102e; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+            .ts-btn:disabled { opacity: .35; }
+            .ts-btn:active:not(:disabled) { transform: scale(.95); }
+            .ts-val { flex: 1; min-width: 0; display: flex; align-items: baseline; justify-content: center; gap: 6px; background: #fff; border: 1.5px solid #c4c4ca; border-radius: 12px; padding: 0 10px; }
+            .ts-val:focus-within { border-color: #c8102e; box-shadow: 0 0 0 4px rgba(200,16,46,.15); }
+            .ts-val input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; text-align: right; font-size: 1.7rem; font-weight: 800; color: #111; padding: 6px 0; -moz-appearance: textfield; }
+            .ts-val input::-webkit-outer-spin-button, .ts-val input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+            .ts-val span { font-weight: 700; color: #c8102e; text-transform: uppercase; font-size: .8rem; letter-spacing: .05em; }
+            .ts-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+            .ts-chip { min-width: 44px; min-height: 36px; padding: 0 12px; border-radius: 999px; border: 1.5px solid #c4c4ca; background: #fff; color: #111; font-weight: 700; font-size: .9rem; }
+            .ts-chip:hover:not(:disabled) { border-color: #111; }
+            .ts-chip.on { background: #c8102e; border-color: #c8102e; color: #fff; }
+            .ts-chip.clr { margin-left: auto; color: #6b7280; font-weight: 600; border-style: dashed; }
+            .ts-total { margin-top: 12px; display: inline-flex; align-items: center; gap: 8px; background: #111; color: #fff; border-radius: 10px; padding: 6px 14px; font-weight: 700; box-shadow: inset 4px 0 0 #c8102e; }
+          `}</style>
+          <div className="row g-3">
+            <div className="col-12 col-md-4">
+              <TimeStepper label="Days" unit="Days" icon="mdi:calendar-clock-outline" step={1} quick={[1, 2, 3, 5, 7, 10]} disabled={readOnly} value={form.estDays} onChange={(v) => set({ estDays: v })} />
+            </div>
+            <div className="col-12 col-md-4">
+              <TimeStepper label="Hours" unit="Hrs" icon="mdi:clock-outline" step={1} quick={[1, 2, 3, 4, 6, 8]} disabled={readOnly} value={splitHM(form.estHours)[0] || ""} onChange={(v) => set({ estHours: joinHM(Math.floor(Number(v) || 0), splitHM(form.estHours)[1]) })} />
+            </div>
+            <div className="col-12 col-md-4">
+              <TimeStepper label="Minutes" unit="Min" icon="mdi:timer-outline" step={5} quick={[10, 15, 30, 45]} disabled={readOnly} value={splitHM(form.estHours)[1] || ""}
+                onChange={(v) => { let m = Math.floor(Number(v) || 0); let [h] = splitHM(form.estHours); if (m >= 60) { h += Math.floor(m / 60); m %= 60; } set({ estHours: joinHM(h, m) }); }} />
+            </div>
           </div>
+          {(Number(form.estHours) > 0 || Number(form.estDays) > 0) && (
+            <div className="ts-total"><Icon icon="mdi:timer-sand" width="20" height="20" /> Estimated repair time: {fmtTime(form.estHours, form.estDays).replace(/ (?=\d+ (Hrs|Min))/g, " + ")}</div>
+          )}
         </Card>
 
-        {/* b. Estimate */}
-        <Card title="Estimate" icon="mdi:calculator-variant-outline" color="#ea580c" summary={`Total ${money(calc.total)}`} done={calc.total > 0}
-          hint="Spare parts and labour come from the earlier stages. Wash prices come from the Wash list.">
-          {/* spare parts */}
-          <div className="border rounded-3 p-3 mb-3">
-            <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-              <div className="fw-semibold">Total Spare Parts Value <span className="text-muted fw-normal">· Generate Spare Parts Requirements</span></div>
-              <Choice disabled={readOnly} value={form.includeSpareParts ? "Y" : "N"} onChange={(v) => set({ includeSpareParts: v === "Y" })} options={[["Y", "YES"], ["N", "NO"]]} />
-            </div>
-            {form.includeSpareParts && (
-              <>
-                {ctx.parts.length === 0 && ctx.quotes.length === 0 ? <div className="small text-muted">No spare parts were added in the previous stage.</div> : (
-                  <Table size="sm" className="mb-1 align-middle">
-                    <thead><tr><th></th><th>Spare part</th><th>Brand</th><th className="text-end">Qty</th><th className="text-end">Total</th></tr></thead>
-                    <tbody>
-                      {ctx.parts.map((p, n) => <tr key={`p${n}`}><td className="text-muted">{letter(n)}.</td><td>{p.name}</td><td className="small">{p.brand || "-"}</td><td className="text-end">{p.qty}</td><td className="text-end">{money(p.qty * p.unitPrice)}</td></tr>)}
-                      {ctx.quotes.map((q, n) => <tr key={`q${n}`}><td className="text-muted">{letter(ctx.parts.length + n)}.</td><td>{q.description} <Badge bg="info">Third party</Badge></td><td>-</td><td className="text-end">1</td><td className="text-end">{money(q.quotedPrice)}</td></tr>)}
-                    </tbody>
-                  </Table>
-                )}
-                <Line label="Spare parts value" value={money(ctx.sparePartsValue)} strong />
-              </>
-            )}
-          </div>
-
-          {/* repair cost */}
-          <div className="border rounded-3 p-3 mb-3">
-            <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-              <div className="fw-semibold">Cost for repair <span className="text-muted fw-normal">· Generate Root Cause &amp; Detail Labour List</span></div>
-              <Choice disabled={readOnly} value={form.includeLabour ? "Y" : "N"} onChange={(v) => set({ includeLabour: v === "Y" })} options={[["Y", "YES"], ["N", "NO"]]} />
-            </div>
-            {form.includeLabour && (
-              <>
-                {ctx.rootCauses.length > 0 && <div className="mb-2"><div className="small fw-semibold">Root causes</div>{ctx.rootCauses.map((r, n) => <div key={n} className="small"><span className="text-muted me-2">{letter(n)}.</span>{r}</div>)}</div>}
-                {ctx.labour.length === 0 ? <div className="small text-muted">No labour list was recorded in the previous stage.</div> : (
-                  <Table size="sm" className="mb-1 align-middle">
-                    <thead><tr><th></th><th>Labour work</th><th className="text-end">Amount</th></tr></thead>
-                    <tbody>{ctx.labour.map((l, n) => <tr key={n}><td className="text-muted">{n + 1}.</td><td>{l.description}{l.repairType && <div className="small text-muted">{l.repairType}</div>}</td><td className="text-end">{money(l.amount)}</td></tr>)}</tbody>
-                  </Table>
-                )}
-              </>
-            )}
-            <div className="fw-semibold small mt-3 mb-1">Write detail list manually</div>
-            {form.manualItems.map((m, n) => (
-              <div key={n} className="d-flex align-items-center gap-2 border-top py-1">
-                <span className="text-muted">{n + 1}.</span><span className="flex-grow-1">{m.description}</span><span>{money(m.amount)}</span>
-                {!readOnly && <Button size="sm" variant="outline-danger" onClick={() => set({ manualItems: form.manualItems.filter((_, i) => i !== n) })}><Icon icon="mdi:delete-outline" width="16" height="16" /></Button>}
-              </div>
+        {/* the estimate sent to the customer BEFORE the confirmation */}
+        <Card anchor="estimate" title="Estimate to Send to the Customer" icon="mdi:file-document-outline" color="#16a34a" done={form.sentVia.length > 0}
+          summary={form.sentVia.length ? `Sent via ${VIA.filter(([k]) => form.sentVia.includes(k)).map((v) => v[1]).join(", ")}` : "Not sent to the customer yet"}
+          hint="Everything is selected by default. Untick what should not go into the estimate, then send it to the customer and take the confirmation below.">
+          <div className="te-row" style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+            {[
+              ["labour", "Repair items", `${ctx.labour.filter((l) => !l.warrantyClaim).length} item(s) · ${money(calcFull.labourAll)}`],
+              ["parts", "Spare parts", `${ctx.parts.filter((p) => !p.warrantyClaim).length + ctx.quotes.length} item(s) · ${money(calcFull.spareAll)}`],
+              ["time", "Estimated time", fmtTime(form.estHours, form.estDays) || "Not set"],
+            ].map(([k, t, v]) => (
+              <button key={k} type="button" role="switch" aria-checked={sendSel[k]} disabled={readOnly} className={`te-chip ${sendSel[k] ? "on" : ""}`} onClick={() => setSendSel((x) => ({ ...x, [k]: !x[k] }))}>
+                <span className="te-box"><Icon icon="mdi:check" width="16" height="16" /></span>
+                <span><small>{t}</small><b>{v}</b></span>
+              </button>
             ))}
-            {!readOnly && (
-              <div className="row g-2 mt-1">
-                <div className="col-12 col-md-7"><FormControl size="sm" placeholder="Description" value={manualDraft.description} onChange={(e) => setManualDraft({ ...manualDraft, description: e.target.value })} onKeyDown={(e) => e.key === "Enter" && addManual()} /></div>
-                <div className="col-8 col-md-3"><FormControl size="sm" type="number" min="0" step="0.01" placeholder="Amount" value={manualDraft.amount} onChange={(e) => setManualDraft({ ...manualDraft, amount: e.target.value })} onKeyDown={(e) => e.key === "Enter" && addManual()} /></div>
-                <div className="col-4 col-md-2 d-grid"><Button size="sm" variant="outline-primary" onClick={addManual}><Icon icon="mdi:plus" width="16" height="16" /> Add</Button></div>
-              </div>
-            )}
-            <div className="border-top mt-3 pt-2"><Line label="Cost for repair" value={money(calc.repair)} strong /></div>
+            <div className="te-sum"><small>Estimate total{calcFull.pct > 0 ? ` (incl. +${calcFull.pct}%)` : ""}</small><b>{money(calcFull.total)}</b></div>
           </div>
-
-          {/* wash */}
-          <div className="border rounded-3 p-3 mb-3">
-            <div className="fw-semibold mb-2">Cost for Wash <span className="text-muted fw-normal">· select one wash type if needed</span></div>
-            {washParents.length === 0 ? <div className="small text-muted">No wash types yet. Add them in Jobs Dashboard &gt; Repair Type &gt; Wash.</div> : (
-              <>
-                {!readOnly && (
-                  <Form.Select className="mb-2" style={{ maxWidth: 420 }} value={washParent} onChange={(e) => pickWashParent(e.target.value)}>
-                    <option value="">Select wash type...</option>
-                    {washParents.map((p) => (
-                      <option key={p.name} value={p.name}>{p.name}{p.single ? ` · ${money(p.single.price)}` : ` (${p.kids.length} types)`}</option>
-                    ))}
-                  </Form.Select>
-                )}
-                {washKids.length > 0 && !readOnly && (
-                  <div className="row g-2 mb-2">
-                    {washKids.map((o) => {
-                      const on = form.washOptionIds.includes(o.id);
-                      return (
-                        <div key={o.id} className="col-12 col-md-6 col-lg-4">
-                          <label className={`d-flex align-items-center gap-2 border rounded-3 px-3 py-2 w-100 ${on ? "border-info bg-info-subtle" : "bg-white"}`} style={{ cursor: "pointer" }}>
-                            <Form.Check.Input type="radio" name="wash-type" checked={on} onChange={() => pickWash(o.id)} onClick={() => on && pickWash(o.id)} />
-                            <span className="flex-grow-1">{o.name}</span><span className="fw-semibold">{money(o.price)}</span>
-                          </label>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                {washSelected.length > 0 && (
-                  <div className="d-flex flex-wrap gap-2 mt-2">
-                    {washSelected.map((o) => (
-                      <span key={o.id} className="badge rounded-pill text-bg-info d-inline-flex align-items-center gap-2 fs-6 fw-normal py-2 px-3">
-                        {o.group ? `${o.group} › ${o.name}` : o.name} · {money(o.price)}
-                        {!readOnly && <button type="button" aria-label="Remove" className="btn-close btn-close-white" style={{ fontSize: 9 }} onClick={() => set({ washOptionIds: [] })} />}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-            <div className="border-top mt-2 pt-2"><Line label="Cost for wash" value={money(calc.wash)} strong /></div>
-          </div>
-
-          {/* total */}
-          <div className="rounded-3 p-3 text-white" style={{ background: "linear-gradient(135deg,#16a34a,#15803d)" }}>
-            <div className="d-flex justify-content-between small opacity-75"><span>Spare parts</span><span>{money(calc.spare)}</span></div>
-            <div className="d-flex justify-content-between small opacity-75"><span>Cost for repair</span><span>{money(calc.repair)}</span></div>
-            <div className="d-flex justify-content-between small opacity-75"><span>Wash</span><span>{money(calc.wash)}</span></div>
-            <div className="d-flex justify-content-between fs-5 fw-bold border-top border-light border-opacity-50 mt-2 pt-2"><span>Estimated Total</span><span>{money(calc.total)}</span></div>
+          <div className="d-flex flex-wrap align-items-center justify-content-end gap-2 mt-3">
+            <Button variant="outline-dark" disabled={!(calcFull.total > 0)} onClick={() => setViewEst("full")}>
+              <Icon icon="mdi:eye-outline" width="18" height="18" /> View estimate
+            </Button>
+            <Button variant="success" className="fw-semibold" disabled={pdfBusy || !(calcFull.total > 0)} onClick={() => downloadEstimate(true)}>
+              {pdfBusy ? <Spinner size="sm" /> : <Icon icon="mdi:file-download-outline" width="18" height="18" />} Download estimate (PDF)
+            </Button>
+            <Button variant="outline-secondary" disabled={pdfBusy || !(calcFull.total > 0)} onClick={() => printEstimate(true)}>
+              <Icon icon="mdi:printer-outline" width="18" height="18" /> Print
+            </Button>
+            <Button variant="primary" className="fw-semibold" disabled={pdfBusy || smsBusy || readOnly || !(calcFull.total > 0)} onClick={() => sendEstimateSms(true)}>
+              {smsBusy ? <Spinner size="sm" /> : <Icon icon="mdi:message-text-outline" width="18" height="18" />} {form.sentVia.includes("SMS") ? "Send via SMS again" : "Send via SMS"}
+            </Button>
           </div>
         </Card>
 
-        {/* sent via */}
-        <Card title="Estimation sent via" icon="mdi:send-outline" color="#7c3aed" right={<Button variant="success" className="fw-semibold shadow-sm" onClick={downloadEstimate}><Icon icon="mdi:download-outline" width="20" height="20" /> Download estimate</Button>} done={form.sentVia.length > 0} summary={form.sentVia.length ? VIA.filter(([k]) => form.sentVia.includes(k)).map((v) => v[1]).join(", ") : "Select one or more"}>
-          <div className="d-flex flex-wrap gap-2">
-            {VIA.map(([k, label, icon]) => {
-              const on = form.sentVia.includes(k);
-              return (
-                <button key={k} type="button" disabled={readOnly} onClick={() => toggle("sentVia", k)} className={`btn d-flex align-items-center gap-2 ${on ? "btn-primary" : "btn-outline-secondary"}`}>
-                  <Icon icon={icon} width="20" height="20" />{label}{on && <Icon icon="mdi:check" width="18" height="18" />}
-                </button>
-              );
-            })}
-          </div>
-        </Card>
+        {/* gate: the next sections stay muted until the customer's reply is received */}
+        {(() => {
+          const got = replyYes ?? Boolean(form.decision);
+          return (
+            <Card anchor="reply" title="Did you receive the customer's confirmation?" icon="mdi:message-reply-text-outline" color="#16a34a" done={got}
+              summary={got ? "Yes, the customer replied" : "Waiting for the customer's reply"}
+              hint="Send the estimate above and wait for the customer's reply. Answer Yes to unlock the confirmation, spare parts and final estimate.">
+              <Choice disabled={readOnly} value={got ? "YES" : "NO"} onChange={(v) => setReplyYes(v === "YES")} options={[["YES", "Yes, received", "mdi:check-circle-outline"], ["NO", "No, not yet", "mdi:clock-outline"]]} />
+            </Card>
+          );
+        })()}
 
+        <div className={(replyYes ?? Boolean(form.decision)) ? "" : "ca-muted"} aria-disabled={!(replyYes ?? Boolean(form.decision))}>
         {/* confirmation */}
-        <Card title="Customer Confirmation" icon="mdi:account-check-outline" color="#16a34a" done={Boolean(form.decision)}
+        <Card anchor="decision" title="Customer Confirmation" icon="mdi:account-check-outline" color="#16a34a" done={Boolean(form.decision)}
           summary={form.decision === "TOTAL" ? "Total approved" : form.decision === "PARTIAL" ? "Partly approved (agreed scope)" : "Not selected"}>
           <Choice disabled={readOnly} value={form.decision} onChange={(v) => set({ decision: v })} options={[["TOTAL", "Total approved", "mdi:check-all"], ["PARTIAL", "Agreed scope only", "mdi:format-list-checks"]]} />
-          {form.decision === "PARTIAL" && (
-            <div className="mt-3">
-              <div className="fw-semibold small mb-1">Agreed Scope</div>
-              {form.agreedScope.map((s, n) => (
-                <div key={n} className="d-flex align-items-center gap-2 border-top py-1">
-                  <span className="text-muted">{letter(n)}.</span><span className="flex-grow-1">{s}</span>
-                  {!readOnly && <Button size="sm" variant="outline-danger" onClick={() => set({ agreedScope: form.agreedScope.filter((_, i) => i !== n) })}><Icon icon="mdi:delete-outline" width="16" height="16" /></Button>}
+          {form.decision === "PARTIAL" && (() => {
+            // the repair items chosen in the Vehicle Job Inspection: tick only the ones the customer agreed to
+            const keyOf = (l) => l.repairType || l.description;
+            const keys = ctx.labour.map(keyOf);
+            const picked = (l) => form.agreedScope.includes(keyOf(l));
+            const custom = form.agreedScope.filter((x) => !keys.includes(x));        // items typed by hand
+            const toggleKey = (l) => set({ agreedScope: picked(l) ? form.agreedScope.filter((x) => x !== keyOf(l)) : [...form.agreedScope, keyOf(l)] });
+            const allOn = keys.length > 0 && keys.every((k) => form.agreedScope.includes(k));
+            return (
+              <div className="mt-3">
+                <div className="d-flex align-items-center gap-2 mb-2">
+                  <div className="fw-semibold small">Agreed Scope <span className="text-muted fw-normal">· tick the repair items the customer agreed to</span></div>
+                  {!readOnly && keys.length > 0 && (
+                    <button type="button" className="btn btn-sm btn-link ms-auto p-0 text-decoration-none fw-semibold" onClick={() => set({ agreedScope: allOn ? custom : [...new Set([...form.agreedScope, ...keys])] })}>{allOn ? "Clear all" : "Select all"}</button>
+                  )}
                 </div>
-              ))}
-              {!readOnly && (
-                <div className="d-flex gap-2 mt-1">
-                  <FormControl size="sm" placeholder="Add an agreed item" value={scopeDraft} onChange={(e) => setScopeDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addScope()} />
-                  <Button size="sm" variant="outline-primary" onClick={addScope}><Icon icon="mdi:plus" width="16" height="16" /> Add</Button>
+                {ctx.labour.length === 0 && <div className="small text-muted mb-2">No repair items were selected in the Vehicle Job Inspection. Add the agreed items below.</div>}
+                <div className="d-flex flex-column gap-2">
+                  {ctx.labour.map((l, n) => {
+                    const on = picked(l);
+                    const [parent, child] = String(l.repairType || "").includes(" > ") ? String(l.repairType).split(" > ") : [l.repairType, null];
+                    return (
+                      <button key={n} type="button" role="checkbox" aria-checked={on} disabled={readOnly} onClick={() => toggleKey(l)}
+                        style={{ display: "flex", alignItems: "center", gap: 10, textAlign: "left", padding: "9px 12px", borderRadius: 12, cursor: readOnly ? "default" : "pointer",
+                          border: `1.5px solid ${on ? "#16a34a" : "#d6d9de"}`, background: on ? "#f0fdf4" : "#fff", color: on ? "#14532d" : "#374151", transition: "all .15s" }}>
+                        <span style={{ width: 22, height: 22, borderRadius: 7, display: "grid", placeItems: "center", flex: "none", border: `1.5px solid ${on ? "#16a34a" : "#c4c8cf"}`, background: on ? "#16a34a" : "#fff", color: on ? "#fff" : "transparent" }}>
+                          <Icon icon="mdi:check" width="16" height="16" />
+                        </span>
+                        <span className="flex-grow-1">
+                          <span className="fw-semibold">{l.description}</span>
+                          {parent && <span className="d-block small text-muted">{child ? parent : l.repairType}</span>}
+                        </span>
+                        {l.warrantyClaim ? <Badge bg="success">Warranty claim</Badge> : <span className="fw-semibold text-nowrap">{money(l.amount)}</span>}
+                      </button>
+                    );
+                  })}
                 </div>
-              )}
-            </div>
-          )}
-          <div className="mt-3">
+                {custom.map((x) => {
+                  const hit = (ctx.repairTree || []).flatMap((g) => g.children).find((c) => c.label === x);
+                  const typed = !hit ? /^(.*) \((Rs\. [\d,]+\.\d{2})\)$/.exec(x) : null;   // "Item (Rs. 1,500.00)"
+                  return (
+                    <div key={x} className="d-flex align-items-center gap-2 border rounded-3 px-3 py-2 mt-2 bg-body-tertiary">
+                      <Icon icon="mdi:plus-circle-outline" width="18" height="18" className="text-success" />
+                      <span className="flex-grow-1"><span className="fw-semibold">{hit ? hit.name : typed ? typed[1] : x}</span>{hit && <span className="d-block small text-muted">{x.split(" > ")[0]}</span>}</span>
+                      {hit?.price != null ? <span className="fw-semibold text-nowrap">{money(hit.price)}</span> : typed ? <span className="fw-semibold text-nowrap">{typed[2]}</span> : null}
+                      {!readOnly && <Button size="sm" variant="outline-danger" onClick={() => set({ agreedScope: form.agreedScope.filter((y) => y !== x) })}><Icon icon="mdi:delete-outline" width="16" height="16" /></Button>}
+                    </div>
+                  );
+                })}
+                {SHOW_ADD_AGREED_ITEM && !readOnly && (() => {
+                  // add another agreed item: department -> repair type -> child type (with its price), like in the Vehicle Job Inspection
+                  const tree = ctx.repairTree || [];
+                  const byDept = tree.reduce((m, g) => { (m[g.department] = m[g.department] || { current: Boolean(g.isCurrent), list: [] }).list.push(g); return m; }, {});
+                  const depts = Object.entries(byDept).sort((a, b) => Number(b[1].current) - Number(a[1].current));
+                  const dept = depts.length === 0 ? "" : scopeDept && byDept[scopeDept] ? scopeDept : depts[0][0];
+                  const group = dept ? byDept[dept].list.find((g) => g.parent === scopeParent) : null;
+                  const addItem = (label) => { if (!form.agreedScope.includes(label)) set({ agreedScope: [...form.agreedScope, label] }); };
+                  return (
+                    <div className="border rounded-3 p-2 mt-3">
+                      <div className="small fw-semibold mb-2">Add another agreed item</div>
+                      {depts.length > 0 && <div className="row g-2">
+                        <div className="col-12 col-md-5">
+                          <Form.Label htmlFor="sc-dept" className="small fw-semibold mb-1">Department</Form.Label>
+                          <FormSelect id="sc-dept" size="sm" aria-label="Department" value={dept} onChange={(e) => { setScopeDept(e.target.value); setScopeParent(""); }}>
+                            {depts.map(([d, v]) => <option key={d} value={d}>{v.current ? `${d} (this department)` : d}</option>)}
+                          </FormSelect>
+                        </div>
+                        <div className="col-12 col-md-7">
+                          <Form.Label htmlFor="sc-type" className="small fw-semibold mb-1">Repair type</Form.Label>
+                          <FormSelect id="sc-type" size="sm" aria-label="Repair type" value={group ? group.parent : ""} onChange={(e) => setScopeParent(e.target.value)}>
+                            <option value="">Select a {dept} repair type...</option>
+                            {byDept[dept].list.map((g) => <option key={g.parent} value={g.parent}>{g.parent}</option>)}
+                          </FormSelect>
+                        </div>
+                      </div>}
+                      {group && (
+                        <div className="d-flex flex-wrap gap-2 mt-2">
+                          {group.children.length === 0 && (
+                            <button type="button" className="btn btn-sm btn-outline-secondary rounded-pill" disabled={form.agreedScope.includes(group.parent)} onClick={() => addItem(group.parent)}><Icon icon="mdi:plus" width="16" height="16" /> {group.parent}</button>
+                          )}
+                          {group.children.map((c) => {
+                            const added = form.agreedScope.includes(c.label);
+                            return (
+                              <button key={c.id} type="button" disabled={added} onClick={() => addItem(c.label)}
+                                className={`btn btn-sm rounded-pill d-inline-flex align-items-center gap-2 ${added ? "btn-success" : "btn-outline-secondary"}`}>
+                                <Icon icon={added ? "mdi:check" : "mdi:plus"} width="16" height="16" />{c.name}{c.price != null && <span className="fw-normal">{money(c.price)}</span>}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <div className="border-top mt-3 pt-2">
+                        <div className="small text-muted mb-1">Not in the list? Add a new item with its own price</div>
+                        <div className="row g-2 align-items-end">
+                          <div className="col-12 col-md-6">
+                            <Form.Label htmlFor="sc-name" className="small fw-semibold mb-1">Item name</Form.Label>
+                            <FormControl id="sc-name" size="sm" placeholder="e.g. Rear lamp fix" value={scopeDraft} onChange={(e) => setScopeDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addScope()} />
+                          </div>
+                          <div className="col-7 col-md-4">
+                            <Form.Label htmlFor="sc-price" className="small fw-semibold mb-1">Price (Rs.) <span className="text-muted fw-normal">- optional</span></Form.Label>
+                            <FormControl id="sc-price" size="sm" type="number" min="0" step="0.01" className="text-end" placeholder="e.g. 1500.00" value={scopePrice} onChange={(e) => setScopePrice(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addScope()} />
+                          </div>
+                          <div className="col-5 col-md-2 d-grid"><Button size="sm" variant="outline-primary" onClick={addScope}><Icon icon="mdi:plus" width="16" height="16" /> Add</Button></div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            );
+          })()}
+          {SHOW_EXTRA_NOTE && <div className="mt-3">
             <div className="fw-semibold small mb-1">Extra note</div>
             <FormControl as="textarea" rows={2} maxLength={1000} disabled={readOnly} value={form.extraNote} onChange={(e) => set({ extraNote: e.target.value })} />
-          </div>
+          </div>}
         </Card>
 
         {/* spare parts provider */}
-        <Card title="Spare Parts Provided by" icon="mdi:cog-transfer-outline" color="#d97706" done={Boolean(form.partsBy)}
+        <Card anchor="parts" title="Spare Parts Provided by" icon="mdi:cog-transfer-outline" color="#d97706" done={Boolean(form.partsBy)}
           summary={form.partsBy === "COMPANY" ? "Provided by us" : form.partsBy === "CLIENT" ? "Provided by client" : "Not selected"}>
           <Choice disabled={readOnly} value={form.partsBy} onChange={(v) => set({ partsBy: v })} options={[["COMPANY", "Provided by us", "mdi:store-outline"], ["CLIENT", "Provided by client", "mdi:account-outline"]]} />
 
           {form.partsBy === "CLIENT" && (
             <div className="mt-3 border rounded-3 p-3">
-              <div className="fw-semibold mb-1">The customer brings the spare parts</div>
-              <div className="small text-muted mb-2">Upload the full spare part list, then send it to the customer.</div>
+              <div className="d-flex align-items-center gap-2 mb-1">
+                <div className="fw-semibold">The customer brings the spare parts</div>
+                {!readOnly && ctx.parts.length > 0 && (
+                  <button type="button" className="btn btn-sm btn-link ms-auto p-0 text-decoration-none fw-semibold" onClick={() => set({ clientParts: ctx.parts.every((p) => form.clientParts.includes(p.id)) ? [] : ctx.parts.map((p) => p.id) })}>
+                    {ctx.parts.every((p) => form.clientParts.includes(p.id)) ? "Clear all" : "Select all"}
+                  </button>
+                )}
+              </div>
+              <div className="small text-muted mb-2">{ctx.parts.length > 0 ? "Tick the spare parts (from the Vehicle Job Inspection) that the customer provides." : "No spare parts were added in the Vehicle Job Inspection."}</div>
+              <div className="d-flex flex-column gap-2 mb-3">
+                {ctx.parts.map((p) => {
+                  const on = form.clientParts.includes(p.id);
+                  return (
+                    <button key={p.id} type="button" role="checkbox" aria-checked={on} disabled={readOnly} onClick={() => set({ clientParts: on ? form.clientParts.filter((x) => x !== p.id) : [...form.clientParts, p.id] })}
+                      style={{ display: "flex", alignItems: "center", gap: 10, textAlign: "left", padding: "9px 12px", borderRadius: 12, cursor: readOnly ? "default" : "pointer",
+                        border: `1.5px solid ${on ? "#16a34a" : "#d6d9de"}`, background: on ? "#f0fdf4" : "#fff", color: on ? "#14532d" : "#374151", transition: "all .15s" }}>
+                      <span style={{ width: 22, height: 22, borderRadius: 7, display: "grid", placeItems: "center", flex: "none", border: `1.5px solid ${on ? "#16a34a" : "#c4c8cf"}`, background: on ? "#16a34a" : "#fff", color: on ? "#fff" : "transparent" }}>
+                        <Icon icon="mdi:check" width="16" height="16" />
+                      </span>
+                      <span className="flex-grow-1">
+                        <span className="fw-semibold">{p.name}</span>
+                        <span className="d-block small text-muted">{[p.brand, p.quality].filter(Boolean).join(" · ")}{p.brand || p.quality ? " · " : ""}Qty {p.qty}</span>
+                      </span>
+                      {on && <Badge bg="success">Customer provides</Badge>}
+                    </button>
+                  );
+                })}
+              </div>
               {form.clientPartsFiles.map((f, n) => (
                 <div key={n} className="d-flex align-items-center gap-2 border-top py-1">
                   <Icon icon="mdi:paperclip" width="18" height="18" className="text-muted" />
                   <a href={f.url} target="_blank" rel="noopener noreferrer" className="flex-grow-1 text-truncate">{f.name}</a>
-                  {!readOnly && <Button size="sm" variant="outline-danger" onClick={() => set({ clientPartsFiles: form.clientPartsFiles.filter((_, i) => i !== n) })}><Icon icon="mdi:delete-outline" width="16" height="16" /></Button>}
                 </div>
               ))}
-              {!readOnly && (
-                <div className="d-flex flex-wrap gap-2 mt-2">
-                  <input ref={fileRef} type="file" hidden accept="image/*,application/pdf" onChange={onFile} />
-                  <Button size="sm" variant="outline-primary" disabled={uploading} onClick={() => fileRef.current?.click()}>{uploading ? <Spinner size="sm" /> : <Icon icon="mdi:upload" width="16" height="16" />} Upload full spare part list</Button>
-                  <Button size="sm" variant="success" disabled={form.clientPartsFiles.length === 0} onClick={sendToCustomer}><Icon icon="mdi:whatsapp" width="16" height="16" /> Send customer</Button>
-                  {saved.clientListSentAt && <span className="small text-success align-self-center"><Icon icon="mdi:check-circle" width="16" height="16" /> Sent {when(saved.clientListSentAt)}</span>}
-                </div>
-              )}
+              <div className="d-flex flex-wrap gap-2 align-items-center">
+                <Button size="sm" variant="success" disabled={readOnly || partsBusy || form.clientParts.length === 0} onClick={sendToCustomer}><Icon icon="mdi:message-text-outline" width="16" height="16" /> Send report link by SMS</Button>
+                <Button size="sm" variant="outline-secondary" disabled={partsBusy || form.clientParts.length === 0} onClick={downloadPartsReport}>
+                  {partsBusy ? <Spinner size="sm" /> : <Icon icon="mdi:file-download-outline" width="16" height="16" />} Download report (PDF)
+                </Button>
+                {saved.clientListSentAt && <span className="small text-success"><Icon icon="mdi:check-circle" width="16" height="16" /> Sent {when(saved.clientListSentAt)}</span>}
+              </div>
             </div>
           )}
 
@@ -529,21 +783,67 @@ var im=document.images[0];if(!im||im.complete){setTimeout(go,150)}else{im.onload
                 </div>
               )}
               {readOnly && saved.repairRequestSentAt && <div className="small text-success">Repair request sent {when(saved.repairRequestSentAt)}</div>}
-
-              <div className="border-top mt-3 pt-3">
-                <div className="fw-semibold mb-1">Third party request</div>
-                <div className="small text-muted mb-2">Request to purchase from third parties (from the Logistic and Stock Department)</div>
-                <FormControl as="textarea" rows={2} maxLength={500} disabled={readOnly} placeholder="Which items? (optional note)" value={form.thirdPartyNote} onChange={(e) => set({ thirdPartyNote: e.target.value })} />
-                {!readOnly && (
-                  <div className="d-flex flex-wrap gap-2 align-items-center mt-2">
-                    <Button size="sm" variant="outline-primary" disabled={sendingLogi} onClick={() => logistics("THIRD_PARTY")}><Icon icon="mdi:storefront-outline" width="16" height="16" /> Request to purchase from third parties</Button>
-                    {saved.thirdPartySentAt && <span className="small text-success"><Icon icon="mdi:check-circle" width="16" height="16" /> Requested {when(saved.thirdPartySentAt)}</span>}
-                  </div>
-                )}
-              </div>
             </div>
           )}
         </Card>
+
+        {/* Total estimate + download */}
+        <Card anchor="sent" title={`Total Estimate  ${money(calc.total)}`} icon="mdi:cash-multiple" color="#16a34a" done={form.sentVia.length > 0}
+          summary={form.sentVia.length ? `Sent via ${VIA.filter(([k]) => form.sentVia.includes(k)).map((v) => v[1]).join(", ")}` : "Not sent to the customer yet"}
+          hint={[form.decision === "PARTIAL" ? `Agreed scope: ${ctx.labour.filter((l) => form.agreedScope.includes(l.repairType || l.description)).length} of ${ctx.labour.length} repair item(s)` : form.decision === "TOTAL" ? "Total approved" : "Customer decision not selected yet",
+            form.partsBy === "CLIENT" ? `Customer provides ${form.clientParts.length} spare part(s) (not charged)` : null,
+            calc.pct > 0 ? `each line with +${calc.pct}% price adjustment` : null, "warranty claims not charged"].filter(Boolean).join(" · ")}>
+          <style>{`
+            .te-row{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch}
+            .te-chip{flex:1 1 170px;display:flex;align-items:center;gap:10px;text-align:left;padding:10px 12px;border:1.5px solid #d6d9de;border-radius:12px;background:#fff;color:#374151;cursor:pointer;transition:all .15s}
+            .te-chip:hover:not(:disabled){border-color:#9ca3af}
+            .te-chip:disabled{cursor:default;opacity:.75}
+            .te-chip .te-box{width:22px;height:22px;border-radius:7px;border:1.5px solid #c4c8cf;display:grid;place-items:center;flex:none;color:transparent;background:#fff}
+            .te-chip small{display:block;color:#6b7280;font-size:.72rem;line-height:1.1}
+            .te-chip b{display:block;font-size:.95rem;line-height:1.25}
+            .te-chip.on{border-color:#16a34a;background:#f0fdf4;color:#14532d}
+            .te-chip.on .te-box{background:#16a34a;border-color:#16a34a;color:#fff}
+            .te-chip.on small{color:#4d7c5f}
+            .te-sum{flex:1 1 190px;border-radius:12px;background:#111827;color:#fff;padding:10px 14px;display:flex;flex-direction:column;justify-content:center}
+            .te-sum small{color:#9ca3af;font-size:.72rem}
+            .te-sum b{font-size:1.15rem}
+          `}</style>
+          <div className="te-row">
+            {[["includeSpareParts", "Spare parts (incl. third-party)", calc.spareAll], ["includeLabour", "Labour / repairs", calc.labourAll]].map(([k, t, v]) => (
+              <button key={k} type="button" role="switch" aria-checked={Boolean(form[k])} disabled={readOnly} className={`te-chip ${form[k] ? "on" : ""}`} onClick={() => set({ [k]: !form[k] })}>
+                <span className="te-box"><Icon icon="mdi:check" width="16" height="16" /></span>
+                <span><small>{t}</small><b>{money(v)}</b></span>
+              </button>
+            ))}
+            <div className="te-sum"><small>Estimate total</small><b>{money(calc.total)}</b></div>
+          </div>
+          <div className="d-flex flex-wrap align-items-center justify-content-end gap-2 mt-3">
+            <Button variant="outline-dark" disabled={!(calc.total > 0)} onClick={() => setViewEst("agreed")}>
+              <Icon icon="mdi:eye-outline" width="18" height="18" /> View estimate
+            </Button>
+            <Button variant="success" className="fw-semibold" disabled={pdfBusy} onClick={() => downloadEstimate()}>
+              {pdfBusy ? <Spinner size="sm" /> : <Icon icon="mdi:file-download-outline" width="18" height="18" />} Download estimate (PDF)
+            </Button>
+            <Button variant="outline-secondary" disabled={pdfBusy} onClick={() => printEstimate()}>
+              <Icon icon="mdi:printer-outline" width="18" height="18" /> Print
+            </Button>
+            <Button variant="primary" className="fw-semibold" disabled={pdfBusy || smsBusy || readOnly} onClick={() => sendEstimateSms()}>
+              {smsBusy ? <Spinner size="sm" /> : <Icon icon="mdi:message-text-outline" width="18" height="18" />} {form.sentVia.includes("SMS") ? "Send via SMS again" : "Send via SMS"}
+            </Button>
+          </div>
+        </Card>
+
+        </div>
+
+        {viewEst && (
+          <Modal show onHide={() => setViewEst(null)} size="xl" centered scrollable>
+            <Modal.Header closeButton><Modal.Title className="fs-6 d-flex align-items-center gap-2"><Icon icon="mdi:file-document-outline" width="20" height="20" /> Estimate {job.jobNo}</Modal.Title></Modal.Header>
+            <Modal.Body className="p-0" style={{ height: "75vh" }}>
+              <iframe title="Estimate" srcDoc={buildEstimateHtml(viewEst === "full")} style={{ width: "100%", height: "100%", border: 0, background: "#fff" }} />
+            </Modal.Body>
+            <Modal.Footer><Button variant="light" onClick={() => setViewEst(null)} style={{ border: "1.5px solid #c4c4ca", fontWeight: 600 }}>Close</Button></Modal.Footer>
+          </Modal>
+        )}
 
         {error && <Alert variant="danger" className="py-2 mb-0">{error}</Alert>}
       </>
@@ -551,19 +851,51 @@ var im=document.images[0];if(!im||im.complete){setTimeout(go,150)}else{im.onload
   };
 
   return (
-    <Modal show onHide={tryClose} size="xl" centered scrollable fullscreen="lg-down" backdrop="static" enforceFocus={false}>
-      <Modal.Header closeButton className="border-0 pb-0">
-        <Modal.Title className="fs-5 d-flex align-items-center gap-3">
-          <span className="d-inline-flex align-items-center justify-content-center rounded-3 text-white" style={{ width: 44, height: 44, background: "#16a34a" }}>
-            <Icon icon="mdi:account-check-outline" width="26" height="26" />
-          </span>
-          <span>Customer Approval{job && <span className="text-muted fw-normal">{` / ${job.departmentName} Department`}</span>}</span>
+    <Modal show onHide={tryClose} size="xl" centered scrollable fullscreen="lg-down" backdrop="static" enforceFocus={false} dialogClassName="ca-modal">
+      <style>{`
+        @media (min-width: 992px) { .modal-dialog.ca-modal { --bs-modal-width: 1060px; } }
+        .ca-muted { opacity: .4; filter: grayscale(.7); pointer-events: none; user-select: none; }
+        .ca-modal .modal-content { border: 0; border-radius: 18px; overflow: hidden; box-shadow: 0 24px 60px -18px rgba(0,0,0,.6); }
+        .ca-modal .ca-head { background: linear-gradient(135deg,#0a0a0a 0%,#7a0a14 55%,#c8102e 100%); color: #fff; border: 0; padding: 16px 22px; }
+        .ca-modal .modal-body { background: #f6f6f7 !important; padding: 18px 22px; }
+        .ca-modal .form-control, .ca-modal .form-select { border-radius: 12px; border: 1.5px solid #c4c4ca; min-height: 44px; }
+        .ca-modal textarea.form-control { min-height: 0; }
+        .ca-modal .form-control:focus, .ca-modal .form-select:focus { border-color: #c8102e; box-shadow: 0 0 0 4px rgba(200,16,46,.15); }
+        .ca-modal .input-group > .form-control { border-radius: 0 12px 12px 0; }
+        .ca-modal .input-group > .form-control:not(:last-child) { border-radius: 0; }
+        .ca-modal .input-group > .input-group-text:first-child { border-radius: 12px 0 0 12px; background: #fde8ea !important; color: #c8102e; border: 1.5px solid #c4c4ca; }
+        .ca-modal .form-check-input { width: 1.2em; height: 1.2em; }
+        .ca-modal .form-check-input:checked { background-color: #c8102e; border-color: #c8102e; }
+        .ca-modal .form-check-input:focus { border-color: #c8102e; box-shadow: 0 0 0 4px rgba(200,16,46,.15); }
+        .ca-modal .btn-outline-primary, .ca-modal .btn-outline-secondary { color: #111; border: 1.5px solid #c4c4ca; border-radius: 10px; font-weight: 600; background: #fff; }
+        .ca-modal .btn-outline-primary:hover, .ca-modal .btn-outline-secondary:hover { color: #fff; background: #111; border-color: #111; }
+        .ca-modal .btn-outline-danger { border-radius: 10px; border-width: 1.5px; }
+        .ca-modal .btn-secondary { background: #111; border-color: #111; border-radius: 10px; }
+        .ca-modal .btn-success, .ca-modal .btn-primary { color: #fff !important; border: 0 !important; border-radius: 10px; font-weight: 700; background: linear-gradient(135deg,#000000 0%,#1c1c1c 50%,#3d3d3d 100%); box-shadow: inset 0 -3px 0 #c8102e; }
+        .ca-modal .btn-success:hover, .ca-modal .btn-primary:hover { filter: brightness(1.25); }
+        .ca-modal .modal-footer { background: #f6f6f7; border-top: 1px solid #e3e3e6; padding: 12px 22px; }
+        .ca-modal .modal-footer .btn { min-height: 46px; padding: 0 22px; border-radius: 12px; }
+        .ca-modal table thead th { background: #111; color: #fff; font-size: .72rem; letter-spacing: .05em; text-transform: uppercase; border: 0; }
+        .ca-modal .ca-flash { animation: caflash 2.5s ease; }
+        @keyframes caflash { 0%,60% { box-shadow: 0 0 0 4px rgba(200,16,46,.55); } 100% { box-shadow: 0 0 0 0 rgba(200,16,46,0); } }
+        .ca-modal .ca-jobno { display: inline-block; background: #111; color: #fff; border-radius: 8px; padding: 3px 10px; font-weight: 700; font-size: .85rem; box-shadow: inset 3px 0 0 #c8102e; }
+        .ca-modal .ca-plate { display: inline-flex; background: #facc15; color: #111; border: 1.5px solid #111; border-radius: 6px; padding: 1px 9px; font-weight: 800; font-size: .82rem; letter-spacing: .05em; }
+      `}</style>
+      <Modal.Header closeButton closeVariant="white" className="ca-head">
+        <Modal.Title className="fs-5 d-flex align-items-center gap-3 text-white">
+          <Icon icon="mdi:account-check-outline" width="30" height="30" />
+          <span>Customer Approval{job && <span className="fw-normal" style={{ color: "rgba(255,255,255,.75)" }}>{` / ${job.departmentName} Department`}</span>}</span>
         </Modal.Title>
       </Modal.Header>
-      <Modal.Body style={{ backgroundColor: "#f1f5f9" }}>{body()}</Modal.Body>
+      <Modal.Body style={{ backgroundColor: "#f6f6f7" }}>{body()}</Modal.Body>
       <Modal.Footer>
         <Button variant="outline-secondary" className="me-auto" disabled={isFetching} onClick={refetch}><Icon icon="mdi:refresh" width="16" height="16" /> Refresh</Button>
-        <Button variant="outline-secondary" onClick={tryClose}>Close</Button>
+        {data && !readOnly && form && autoState && (
+          <span className="small text-muted">
+            {autoState === "saving" ? "Saving…" : autoState === "pending" ? "Unsaved changes…" : autoState === "failed" ? <span className="text-danger">Auto-save failed - use Save</span> : <span className="text-success"><Icon icon="mdi:check" width="16" height="16" /> All changes saved</span>}
+          </span>
+        )}
+        <Button variant="light" onClick={tryClose} style={{ border: "1.5px solid #c4c4ca", color: "#111", fontWeight: 600 }}>Close</Button>
         {data && !readOnly && form && (
           <>
             <Button variant="outline-primary" disabled={saving || !dirty} onClick={saveClick}>{saving ? <Spinner size="sm" /> : <Icon icon="mdi:content-save-outline" width="18" height="18" />} Save</Button>
@@ -574,4 +906,3 @@ var im=document.images[0];if(!im||im.complete){setTimeout(go,150)}else{im.onload
     </Modal>
   );
 }
-

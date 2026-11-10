@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { InputGroup, FormControl, ListGroup, Spinner } from "react-bootstrap";
+import { InputGroup, FormControl, Spinner } from "react-bootstrap";
 import { Icon } from "@iconify/react";
 import { useLazySearchCustomersQuery } from "@/store/features/apiSlice";
 
@@ -69,20 +69,26 @@ export default function CustomerSearch({ onSelect }) {
   };
 
   return (
-    <div ref={boxRef} className="position-relative mb-3">
-      <label className="fw-semibold small mb-1 d-block">Search Existing Customer</label>
+    <div ref={boxRef} className="position-relative mb-2 rounded-4 px-3 py-2" style={{ background: "linear-gradient(135deg,#f4f4f5,#f4f4f5)", border: "1px solid #efeff0" }}>
+      <div className="d-flex align-items-center gap-2 mb-1">
+        <Icon icon="mdi:account-search-outline" width="20" height="20" style={{ color: "#111111" }} />
+        <span className="fw-bold" style={{ color: "#0f172a", fontSize: ".85rem" }}>Existing customer?</span>
+        <span className="text-muted d-none d-sm-inline" style={{ fontSize: ".7rem" }}>Search and the form fills itself</span>
+      </div>
 
-      <InputGroup>
-        <InputGroup.Text className="bg-white">
-          <Icon icon="mdi:magnify" width="20" height="20" />
+      <style>{`.cs-input::placeholder{color:#64748b!important;opacity:1!important}`}</style>
+      <InputGroup className="shadow-sm" style={{ borderRadius: 12, overflow: "visible" }}>
+        <InputGroup.Text className="bg-white border-end-0" style={{ borderRadius: "12px 0 0 12px", paddingLeft: 16 }}>
+          <Icon icon="mdi:magnify" width="20" height="20" style={{ color: "#111111" }} />
         </InputGroup.Text>
         <FormControl
+          className="border-start-0 cs-input" style={{ minHeight: 44, fontSize: ".9rem" }}
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => results.length > 0 && setOpen(true)}
           onKeyDown={(e) => e.key === "Escape" && setOpen(false)}
-          placeholder="Mobile / Name / NIC / Vehicle number"
+          placeholder="Type mobile number, customer name, NIC or vehicle number to search..."
           autoComplete="off"
         />
         {loading && (
@@ -103,42 +109,65 @@ export default function CustomerSearch({ onSelect }) {
       </InputGroup>
 
       {open && (
-        <ListGroup
-          className="position-absolute w-100 shadow"
-          style={{ zIndex: 1050, maxHeight: 280, overflowY: "auto" }}
+        <div
+          className="position-absolute w-100 bg-white"
+          style={{ zIndex: 1050, maxHeight: 300, overflowY: "auto", marginTop: 4, left: 0, borderRadius: 12, border: "1.5px solid #111111", boxShadow: "0 18px 40px -12px rgba(15,23,42,.35)" }}
         >
+          <style>{`.cs-row{cursor:pointer;transition:background .12s;border-bottom:1px solid #f1f1f3}.cs-row:last-child{border-bottom:0}.cs-row .gap-1{margin-top:2px}.cs-row:hover{background:#f4f4f5}`}</style>
           {results.length === 0 ? (
-            <ListGroup.Item className="text-muted small">No customers found</ListGroup.Item>
+            <div className="text-muted p-2 text-center" style={{ fontSize: ".8rem" }}>
+              <Icon icon="mdi:account-search-outline" width="22" height="22" /> No customers found
+            </div>
           ) : (
             results.map((c) => (
-              <ListGroup.Item key={c.customerId} action onClick={() => pick(c)} className="py-2">
-                <div className="d-flex justify-content-between align-items-start gap-2">
-                  <strong>{c.customerName}</strong>
-                  <small className="text-muted">{c.customerId}</small>
-                </div>
-                <div className="small text-muted">
-                  <Icon icon="mdi:phone-outline" width="14" height="14" /> {c.contactNumber}
-                  {c.nic && (
-                    <>
-                      {" · "}
-                      <Icon icon="mdi:card-account-details-outline" width="14" height="14" /> {c.nic}
-                    </>
+              <div key={c.customerId} className="cs-row d-flex align-items-start gap-2 px-2 py-1" onClick={() => pick(c)}>
+                <span
+                  className="d-inline-flex align-items-center justify-content-center rounded-circle fw-bold text-white flex-shrink-0"
+                  style={{ width: 32, height: 32, background: "linear-gradient(135deg,#3d3d3d,#000000)", fontSize: ".85rem" }}
+                >
+                  {(c.customerName || "?").trim().charAt(0).toUpperCase()}
+                </span>
+                <div className="flex-grow-1" style={{ minWidth: 0 }}>
+                  <div className="d-flex flex-wrap align-items-center gap-2">
+                    <strong style={{ fontSize: ".85rem", color: "#0f172a" }}>{c.customerName}</strong>
+                    <span className="rounded-pill px-2 fw-semibold" style={{ fontSize: ".64rem", background: "#111", color: "#fff" }}>{c.customerId}</span>
+                    {c.categoryName && (
+                      <span className="rounded-pill px-2 fw-semibold" style={{ fontSize: ".64rem", background: "#efeff0", color: "#111111" }}>{c.categoryName}</span>
+                    )}
+                  </div>
+                  <div className="d-flex flex-wrap gap-2 mt-0" style={{ fontSize: ".72rem", color: "#475569" }}>
+                    {c.contactNumber && (
+                      <span><Icon icon="mdi:phone-outline" width="13" height="13" style={{ color: "#111111" }} /> {c.contactNumber}</span>
+                    )}
+                    {c.nic && (
+                      <span><Icon icon="mdi:card-account-details-outline" width="13" height="13" style={{ color: "#111111" }} /> {c.nic}</span>
+                    )}
+                    {c.ownReferralCode && (
+                      <span><Icon icon="mdi:gift-outline" width="13" height="13" style={{ color: "#111111" }} /> {c.ownReferralCode}</span>
+                    )}
+                    {c.loyaltyPoints > 0 && (
+                      <span><Icon icon="mdi:star-circle-outline" width="13" height="13" style={{ color: "#111111" }} /> {c.loyaltyPoints} pts</span>
+                    )}
+                  </div>
+                  {c.vehicles?.length > 0 && (
+                    <div className="d-flex flex-wrap gap-1 mt-1">
+                      {c.vehicles.map((v) => (
+                        <span key={v.regNo} className="fw-bold rounded px-1" style={{ fontSize: ".68rem", background: "#facc15", color: "#111", border: "1px solid #111", letterSpacing: ".04em" }}>
+                          {v.regNo}
+                        </span>
+                      ))}
+                    </div>
                   )}
                 </div>
-                {c.vehicles?.length > 0 && (
-                  <div className="small text-muted">
-                    <Icon icon="mdi:car-outline" width="14" height="14" />{" "}
-                    {c.vehicles.map((v) => v.regNo).join(", ")}
-                  </div>
-                )}
-              </ListGroup.Item>
+                <Icon icon="mdi:chevron-right" width="18" height="18" className="flex-shrink-0 align-self-center" style={{ color: "#94a3b8" }} />
+              </div>
             ))
           )}
-        </ListGroup>
+        </div>
       )}
 
       {loaded && (
-        <div className="text-success small mt-1">
+        <div className="text-success mt-1" style={{ fontSize: ".75rem" }}>
           <Icon icon="mdi:check-circle-outline" width="16" height="16" /> Loaded{" "}
           <strong>{loaded.customerName}</strong> ({loaded.customerId}). Details have been auto-filled and can still be edited.
           {loaded.vehicles?.length > 0 &&

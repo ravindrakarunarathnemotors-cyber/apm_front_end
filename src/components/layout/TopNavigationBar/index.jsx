@@ -165,21 +165,21 @@ const TopNavigationBar = () => {
                   <button
                     type="button"
                     onClick={toggleFullscreen}
-                    className="kz-fs-btn p-1 rounded-circle hover-red-bg d-flex align-items-center justify-content-center border-0 bg-transparent"
+                    className="kz-fs-btn kz-icon-btn border-0 bg-transparent p-0"
                     title={isFullscreen ? 'Exit full screen' : 'Full screen'}
                     aria-label={isFullscreen ? 'Exit full screen' : 'Full screen'}
                   >
                     <IconifyIcon
                       icon={isFullscreen ? 'mdi:fullscreen-exit' : 'mdi:fullscreen'}
                       className="text-white"
-                      style={{ fontSize: 30 }}
+                      style={{ fontSize: 26 }}
                     />
                   </button>
                 )}
-                <div className="p-1 rounded-circle hover-red-bg d-flex align-items-center">
+                <div className="kz-icon-btn">
                   <ThemeModeToggle />
                 </div>
-                <div className="p-1 rounded-circle hover-red-bg d-flex align-items-center">
+                <div className="kz-icon-btn kz-bell">
                   <Notifications />
                 </div>
                 <div className="ms-1 d-flex align-items-center">
@@ -202,7 +202,29 @@ const TopNavigationBar = () => {
         .hover-red-bg:hover {
           background: rgba(239, 68, 68, 0.25);
         }
-        .kz-fs-btn { width: 42px; height: 42px; cursor: pointer; }
+        /* Every icon in the top bar = the same 40px circle, the hover highlight is a perfect circle */
+        .kz-icon-btn {
+          width: 40px; height: 40px; flex-shrink: 0;
+          display: flex; align-items: center; justify-content: center;
+          border-radius: 50%; cursor: pointer;
+          transition: background .2s ease;
+        }
+        .kz-icon-btn:hover { background: rgba(255, 255, 255, 0.14); }
+        .kz-icon-btn > button { width: 100% !important; height: 100% !important; border-radius: 50%; }
+        .kz-icon-btn .dropdown, .kz-icon-btn .topbar-item {
+          width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+        }
+        .kz-icon-btn .nav-link, .kz-icon-btn .nav-icon {
+          width: 100%; height: 100%; padding: 0 !important; margin: 0 !important;
+          display: flex !important; align-items: center; justify-content: center;
+          line-height: 1; border-radius: 50% !important; background: transparent !important;
+        }
+        .kz-icon-btn .nav-link i, .kz-icon-btn .nav-icon i { font-size: 22px; line-height: 1; }
+        /* main notification bell: white circle, dark icon */
+        .kz-icon-btn.kz-bell { background: #ffffff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); }
+        .kz-icon-btn.kz-bell:hover { background: #f1f1f3; }
+        .kz-icon-btn.kz-bell .nav-link, .kz-icon-btn.kz-bell .nav-link i { color: #111111 !important; }
+        .kz-icon-btn .badge { font-size: 10px; padding: 3px 5px; }
         .kz-fs-btn:focus-visible { outline: 2px solid rgba(239, 68, 68, 0.8); outline-offset: 2px; }
         input::placeholder {
           color: rgba(255, 255, 255, 0.5) !important;

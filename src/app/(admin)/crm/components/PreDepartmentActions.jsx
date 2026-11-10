@@ -75,18 +75,56 @@ export default function PreDepartmentActions({ job, block = false }) {
         />
       )}
       {deptOpen && (
-        <Modal show onHide={() => setDeptOpen(false)} centered size="sm" enforceFocus={false}>
-          <Modal.Header closeButton><Modal.Title className="fs-6">Select Department · {job.jobNo}</Modal.Title></Modal.Header>
-          <Modal.Body className="d-grid gap-2">
-            {departments.length === 0 && <div className="text-muted">No departments.</div>}
-            {departments.map((d) => (
-              <Button key={d.id} variant="outline-primary" className="text-start" disabled={saving}
-                onClick={async () => { if (await pick(d)) setDeptOpen(false); }}>
-                <Icon icon={getDepartmentUi(d.name).icon} width="18" height="18" color={getDepartmentUi(d.name).color} className="me-2" />{d.name}
-              </Button>
-            ))}
+        <Modal show onHide={() => setDeptOpen(false)} centered enforceFocus={false} dialogClassName="sd-modal">
+          <style>{`
+            .sd-modal .modal-content { border: 0; border-radius: 18px; overflow: hidden; box-shadow: 0 24px 60px -18px rgba(0,0,0,.6); }
+            @media (min-width: 576px) { .modal-dialog.sd-modal { --bs-modal-width: 520px; } }
+            .sd-head { background: linear-gradient(135deg,#0a0a0a 0%,#7a0a14 55%,#c8102e 100%); color: #fff; border: 0; padding: 16px 22px; }
+            .sd-modal .modal-body { background: #f6f6f7; padding: 18px 20px; }
+            .sd-jobno { display: inline-block; background: #111; color: #fff; border-radius: 8px; padding: 3px 10px; font-weight: 700; font-size: .82rem; box-shadow: inset 3px 0 0 #c8102e; }
+            .sd-plate { display: inline-flex; background: #facc15; color: #111; border: 1.5px solid #111; border-radius: 6px; padding: 1px 9px; font-weight: 800; font-size: .82rem; letter-spacing: .05em; }
+            .sd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+            @media (max-width: 420px) { .sd-grid { grid-template-columns: 1fr; } }
+            .sd-dept { display: flex; align-items: center; gap: 12px; text-align: left; background: #fff; border: 1.5px solid #e3e3e6; border-left-width: 5px; border-radius: 14px; padding: 12px 12px; min-height: 68px; font-weight: 700; color: #0f172a; transition: transform .12s, box-shadow .15s, border-color .15s, background .15s; }
+            .sd-dept:hover:not(:disabled) { transform: translateY(-2px); background: #fff1f2; box-shadow: 0 10px 22px -12px rgba(200,16,46,.55); }
+            .sd-dept:disabled { opacity: .55; }
+            .sd-ico { width: 44px; height: 44px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+            .sd-modal .modal-footer { background: #f6f6f7; border-top: 1px solid #e3e3e6; padding: 12px 20px; }
+            .sd-back { border-radius: 12px; min-height: 44px; padding: 0 20px; font-weight: 600; background: #fff; color: #111; border: 1.5px solid #c4c4ca; }
+          `}</style>
+          <Modal.Header closeButton closeVariant="white" className="sd-head">
+            <Modal.Title className="fs-5 d-flex align-items-center gap-2 text-white">
+              <Icon icon="mdi:domain" width="28" height="28" /> Select Department
+            </Modal.Title>
+          </Modal.Header>
+          <Modal.Body>
+            <div className="d-flex align-items-center gap-2 mb-3">
+              <span className="sd-jobno">{job.jobNo}</span>
+              {job.regNo && <span className="sd-plate">{job.regNo}</span>}
+              <span className="small text-muted ms-1">Which department will do this job?</span>
+            </div>
+            {departments.length === 0 && <div className="text-muted text-center py-3">No departments.</div>}
+            <div className="sd-grid">
+              {departments.map((d) => {
+                const ui = getDepartmentUi(d.name);
+                return (
+                  <button key={d.id} type="button" className="sd-dept" style={{ borderLeftColor: ui.color }} disabled={saving}
+                    onClick={async () => { if (await pick(d)) setDeptOpen(false); }}>
+                    <span className="sd-ico" style={{ color: ui.color, background: `color-mix(in srgb, ${ui.color} 12%, white)` }}>
+                      <Icon icon={ui.icon} width="26" height="26" />
+                    </span>
+                    <span className="flex-grow-1">{d.name}</span>
+                    <Icon icon="mdi:chevron-right" width="22" height="22" style={{ color: "#94a3b8" }} />
+                  </button>
+                );
+              })}
+            </div>
           </Modal.Body>
-          <Modal.Footer><Button variant="secondary" onClick={() => { setDeptOpen(false); setOpen(true); }}>Back</Button></Modal.Footer>
+          <Modal.Footer>
+            <Button variant="light" className="sd-back" onClick={() => { setDeptOpen(false); setOpen(true); }}>
+              <Icon icon="mdi:arrow-left" width="18" height="18" /> Back
+            </Button>
+          </Modal.Footer>
         </Modal>
       )}
     </>

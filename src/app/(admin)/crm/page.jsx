@@ -21,18 +21,19 @@ const CrmPage = () => {
         <h4 className="mb-0 text-dark">CRM</h4>
 
         <Button
-          variant={showForm ? "outline-dark" : "primary"}
-          className="d-inline-flex align-items-center gap-1 text-nowrap fw-semibold"
+          variant={showForm ? "outline-dark" : "light"}
+          className={`d-inline-flex align-items-center gap-1 text-nowrap fw-semibold ${showForm ? "" : "border-0 text-white"}`}
+          style={showForm ? { minHeight: 52, padding: "0 22px", fontSize: "1.05rem" } : { minHeight: 52, padding: "0 22px", fontSize: "1.05rem", background: "linear-gradient(135deg,#0a0a0a 0%,#7a0a14 55%,#c8102e 100%)", boxShadow: "0 6px 16px -6px rgba(200,16,46,.6)" }}
           onClick={() => setShowForm((v) => !v)}
           aria-expanded={showForm}
         >
           {showForm ? (
             <>
-              <Icon icon="mdi:close" width="20" height="20" /> Close
+              <Icon icon="mdi:close" width="24" height="24" /> Close
             </>
           ) : (
             <>
-              <Icon icon="mdi:account-plus-outline" width="20" height="20" />
+              <Icon icon="mdi:account-plus-outline" width="24" height="24" />
               <span className="d-none d-sm-inline">Add Customer / Create Job</span>
               <span className="d-sm-none">Add Customer</span>
             </>

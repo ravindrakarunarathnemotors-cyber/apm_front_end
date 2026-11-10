@@ -209,10 +209,10 @@ export default function DamageReportModal({ jobId, onHide, onSaved }) {
     setTouched(true);
     setServerError("");
     if (problems.length) return;
-    if (needAny && !report?.decision) {
+    if (needAny && !report?.decision && !report?.confirmSentAt) {
       const w = await Swal.fire({
-        title: "Customer confirmation needed",
-        html: "The customer has <b>not confirmed</b> yet. This stage stays open until the customer confirms (use <b>Send link</b> or <b>Customer confirmed</b>).<br>Save the changes anyway?",
+        title: "Link not sent yet",
+        html: "The link has <b>not been sent</b> to the customer yet. The job moves to the next stage once the link is sent (the customer can confirm later).<br>Save the changes anyway?",
         icon: "warning", showCancelButton: true, confirmButtonText: "Save anyway", cancelButtonText: "Back", confirmButtonColor: "#d97706",
       });
       if (!w.isConfirmed) return;
@@ -229,7 +229,7 @@ export default function DamageReportModal({ jobId, onHide, onSaved }) {
       const res = await save(body).unwrap();
       await Swal.fire({
         title: res.stageCompleted ? "Report saved!" : "Report saved",
-        text: res.stageCompleted ? `${job.jobNo} moved to the next stage.` : "This stage stays open until the customer answers.",
+        text: res.stageCompleted ? `${job.jobNo} moved to the next stage.` : "Send the link to the customer to move the job on.",
         icon: "success", timer: 1700, showConfirmButton: false,
       });
       onSaved?.({ jobId, stageCompleted: Boolean(res.stageCompleted) });
@@ -314,6 +314,11 @@ export default function DamageReportModal({ jobId, onHide, onSaved }) {
     try {
       const res = await makeLink(jobId).unwrap();
       await share({ title: "Confirmation link ready", path: res.path, text: `Please confirm the agreed work for ${job.regNo}` });
+      if (res.stageCompleted) {
+        // the link is sent: the job does not wait for the customer, it moves on to the next stage
+        onSaved?.({ jobId, stageCompleted: true });
+        onHide();
+      }
     } catch (ex) {
       Swal.fire({ title: "Failed", text: ex?.data?.message || "Could not create the link.", icon: "error" });
     }
