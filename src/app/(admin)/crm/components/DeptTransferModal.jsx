@@ -14,6 +14,7 @@ export default function DeptTransferModal({ jobId, onHide, onSaved }) {
   const [save, { isLoading: saving }] = useSaveDeptTransferMutation();
   const [transfer, setTransfer] = useState(false);   // default No
   const [deptId, setDeptId] = useState("");           // the one department (only when Yes)
+  const [remark, setRemark] = useState("");           // optional remark (Yes or No)
 
   const job = data?.job;
   // all the departments the job can go to (an older backend sent them as "standard" + "others")
@@ -32,7 +33,7 @@ export default function DeptTransferModal({ jobId, onHide, onSaved }) {
     });
     if (!c.isConfirmed) return;
     try {
-      const r = await save({ jobId, transfer, departmentId: transfer ? Number(deptId) : undefined }).unwrap();
+      const r = await save({ jobId, transfer, departmentId: transfer ? Number(deptId) : undefined, remark: remark.trim() || undefined }).unwrap();
       if (r.created?.length) await Swal.fire({ title: "Transferred", html: r.created.map((x) => `<b>${x.jobNo}</b>`).join("<br/>"), icon: "success", confirmButtonText: "OK" });
       onSaved?.({ jobId, stageCompleted: Boolean(r.stageCompleted), created: r.created || [] });
       onHide();
@@ -56,6 +57,7 @@ export default function DeptTransferModal({ jobId, onHide, onSaved }) {
           <div className="dt-card">
             <div className="dt-title"><Icon icon="mdi:check-decagram" width="20" height="20" /> Transfer stage completed</div>
             {(data.saved || []).filter((x) => x.transferred).length === 0 && <div className="text-muted">Not transferred to another department.</div>}
+            {data.header?.remark && <div className="mt-2 p-2 rounded" style={{ background: "#fafafa", border: "1px solid #e3e3e6", whiteSpace: "pre-wrap" }}><div className="small text-muted fw-semibold">Remark</div>{data.header.remark}</div>}
             {(data.saved || []).filter((x) => x.transferred).map((x) => (
               <div key={x.departmentId} className="dt-row">
                 <span style={{ flex: 1 }}>Transferred to {x.departmentName} Department</span>
@@ -81,6 +83,11 @@ export default function DeptTransferModal({ jobId, onHide, onSaved }) {
                 <div className="small text-muted mt-2">A new job is created in that department (same customer and vehicle) and the related department process starts there.</div>
               </div>
             )}
+            <div className="mt-3">
+              <Form.Label className="small fw-semibold mb-1">Remark <span className="text-muted fw-normal">(optional)</span></Form.Label>
+              <Form.Control as="textarea" rows={3} maxLength={1000} disabled={locked} value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="Reason for the transfer / anything the other department should know" />
+              <div className="small text-muted text-end">{remark.length} / 1000</div>
+            </div>
           </div>
         )}
       </>

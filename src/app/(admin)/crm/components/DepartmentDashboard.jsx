@@ -29,6 +29,14 @@ import ExtraJobScopeModal from "./ExtraJobScopeModal"; // Extra Job Scope (only 
 import DamageReportModal from "./DamageReportModal"; // Stage 8: vehicle damages report (can be skipped)
 import VehicleJobCheckModal from "./VehicleJobCheckModal"; // Wash: Vehicle Job Inspection checklist (after the damages report)
 import { useGetJobCheckDepartmentQuery } from "./jobCheckApi";
+import WashTeamInspectionModal from "./WashTeamInspectionModal"; // Wash: Team Self-Inspection (after the job inspection)
+import { useGetTeamCheckDepartmentQuery } from "./teamCheckApi";
+import WashDryingAreaModal from "./WashDryingAreaModal"; // Wash: Drying Area (after the team self-inspection)
+import { useGetDryingCheckDepartmentQuery } from "./dryingCheckApi";
+import WashInternalInspectionModal from "./WashInternalInspectionModal"; // Wash: Internal Inspection 2 (after the drying area)
+import { useGetInternalCheckDepartmentQuery } from "./internalCheckApi";
+import WashDeliveryReviewModal from "./WashDeliveryReviewModal"; // Wash: Delivery Review + OTP (after the delivery arrangement)
+import { useGetWashDeliveryDepartmentQuery } from "./washDeliveryApi";
 import TeamAllocationModal from "./TeamAllocationModal"; // Stage 6: team allocation (team, bay, team leader, PPE ...)
 import { usePermissions } from "./permissionsApi"; // action permissions (button shown only when allowed)
 import ManageTeamsBaysModal from "./ManageTeamsBaysModal"; // create / edit teams and bays any time (not only at stage 6)
@@ -301,6 +309,14 @@ export default function DepartmentDashboard({ department }) {
   const [reportJobId, setReportJobId] = useState(null);
   const [checkJobId, setCheckJobId] = useState(null); // Wash: Vehicle Job Inspection checklist
   const { data: jcDept } = useGetJobCheckDepartmentQuery(department);
+  const [washTeamJobId, setWashTeamJobId] = useState(null); // Wash: Team Self-Inspection
+  const { data: tcDept } = useGetTeamCheckDepartmentQuery(department);
+  const [dryJobId, setDryJobId] = useState(null); // Wash: Drying Area
+  const { data: dcDept } = useGetDryingCheckDepartmentQuery(department);
+  const [intJobId, setIntJobId] = useState(null); // Wash: Internal Inspection 2
+  const { data: icDept } = useGetInternalCheckDepartmentQuery(department);
+  const [washDelJobId, setWashDelJobId] = useState(null); // Wash: Delivery Review
+  const { data: wdDept } = useGetWashDeliveryDepartmentQuery(department);
   const { data: drDept } = useGetDamageReportDepartmentQuery(department); // Mechanical: stage 8 damages report
   const [managingBays, setManagingBays] = useState(false);
   const { data: bayDept } = useGetBayDepartmentQuery(department); // Wash: bays only, no teams
@@ -420,6 +436,24 @@ export default function DepartmentDashboard({ department }) {
       const open = job.stageNo === checkStage;
       list.push({ key: "jobcheck", label: open ? "Job Inspection" : "Inspection", icon: "mdi:clipboard-check-outline", current: open, run: () => setCheckJobId(job.id) });
     }
+    // Wash: Team Self-Inspection (the stage right after the job inspection)
+    const teamStage = tcDept?.teamCheckStageNo ?? 9;
+    if (tcDept?.hasTeamCheck && job.stageNo >= teamStage && live) {
+      const open = job.stageNo === teamStage;
+      list.push({ key: "teamcheck", label: open ? "Team Inspection" : "Team Check", icon: "mdi:account-group-outline", current: open, run: () => setWashTeamJobId(job.id) });
+    }
+    // Wash: Drying Area (the stage right after the team self-inspection)
+    const dryStage = dcDept?.dryingCheckStageNo ?? 10;
+    if (dcDept?.hasDryingCheck && job.stageNo >= dryStage && live) {
+      const open = job.stageNo === dryStage;
+      list.push({ key: "dryingcheck", label: open ? "Drying Area" : "Drying", icon: "mdi:car-wash", current: open, run: () => setDryJobId(job.id) });
+    }
+    // Wash: Internal Inspection 2 (the stage right after the drying area)
+    const intStage = icDept?.internalCheckStageNo ?? 11;
+    if (icDept?.hasInternalCheck && job.stageNo >= intStage && live) {
+      const open = job.stageNo === intStage;
+      list.push({ key: "internalcheck", label: open ? "Internal Inspection" : "Interior", icon: "mdi:car-seat", current: open, run: () => setIntJobId(job.id) });
+    }
     // Spare Part Review & Order: the spare parts are part of the Vehicle Job Inspection window, so this stage has no button of its own.
     // It is only offered for a job that is still waiting at this stage (saved earlier), so that it can be completed.
     if (evDept?.hasSpareParts && evDept.spareStageNo && job.stageNo === evDept.spareStageNo && live) {
@@ -464,7 +498,13 @@ export default function DepartmentDashboard({ department }) {
     // Handover readiness (after Job Completed)
     if (evDept?.hasHandoverCheck && evDept.handoverCheckStageNo && job.stageNo >= evDept.handoverCheckStageNo && live) {
       const open = job.stageNo === evDept.handoverCheckStageNo;
-      list.push({ key: "handover", label: open ? "Handover Check" : "Handover", icon: "mdi:car-key", current: open, run: () => setHandoverJobId(job.id) });
+      list.push({ key: "handover", label: open ? (/wash/i.test(department) ? "Delivery Arrangement" : "Handover Check") : (/wash/i.test(department) ? "Delivery" : "Handover"), icon: "mdi:car-key", current: open, run: () => setHandoverJobId(job.id) });
+    }
+    // Wash: Delivery Review + OTP (the stage right after the delivery arrangement)
+    const washDelStage = wdDept?.washDeliveryStageNo ?? 14;
+    if (wdDept?.hasWashDelivery && job.stageNo >= washDelStage && live) {
+      const open = job.stageNo === washDelStage;
+      list.push({ key: "washdelivery", label: "Delivery Review", icon: "mdi:car-key", current: open, run: () => setWashDelJobId(job.id) });
     }
     // Delivery Review (after Handover Readiness)
     if (evDept?.hasDeliveryReview && evDept.deliveryReviewStageNo && job.stageNo >= evDept.deliveryReviewStageNo && live) {
@@ -478,6 +518,10 @@ export default function DepartmentDashboard({ department }) {
     }
     // Invoice (created when the Customer Approval stage is completed)
     if (evDept?.hasCustomerApproval && evDept.approvalStageNo && job.stageNo > evDept.approvalStageNo && live) {
+      list.push({ key: "invoice", label: "Invoice", icon: "mdi:receipt-text-outline", current: false, run: () => setInvoiceJobId(job.id) });
+    }
+    // Wash: the invoice is created when the job is started, and the charges are added to it as the stages go on
+    if (/wash/i.test(department) && !evDept?.hasCustomerApproval && job.startedAt && live) {
       list.push({ key: "invoice", label: "Invoice", icon: "mdi:receipt-text-outline", current: false, run: () => setInvoiceJobId(job.id) });
     }
     // Extra Job Scope: only after the job is activated
@@ -806,9 +850,10 @@ export default function DepartmentDashboard({ department }) {
       {activationJobId && <JobActivationModal key={`ja${activationJobId}`} jobId={activationJobId} onHide={() => setActivationJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted && evDept?.hasTeamInspection) setTeamInspJobId(jobId); }} />}
       {teamInspJobId && <TeamInspectionModal key={`ti${teamInspJobId}`} jobId={teamInspJobId} onHide={() => setTeamInspJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted && evDept?.hasTeamReview) setTeamReviewJobId(jobId); }} />}
       {teamReviewJobId && <TeamReviewModal key={`tr${teamReviewJobId}`} jobId={teamReviewJobId} onHide={() => setTeamReviewJobId(null)} onSaved={({ jobId, reopened, stageCompleted }) => { if (reopened) setTeamInspJobId(jobId); else if (stageCompleted && evDept?.hasDeptTransfer) setTransferJobId(jobId); }} />}
-      {transferJobId && <DeptTransferModal key={`dt${transferJobId}`} jobId={transferJobId} onHide={() => setTransferJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted && evDept?.hasJobEnd) setJobEndJobId(jobId); }} />}
+      {transferJobId && <DeptTransferModal key={`dt${transferJobId}`} jobId={transferJobId} onHide={() => setTransferJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (!stageCompleted) return; if (evDept?.hasJobEnd) setJobEndJobId(jobId); else if (evDept?.hasHandoverCheck) setHandoverJobId(jobId); }} />}
       {jobEndJobId && <JobEndModal key={`je${jobEndJobId}`} jobId={jobEndJobId} onHide={() => setJobEndJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted && evDept?.hasHandoverCheck) setHandoverJobId(jobId); }} />}
-      {handoverJobId && <HandoverCheckModal key={`hc${handoverJobId}`} jobId={handoverJobId} onHide={() => setHandoverJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted && evDept?.hasDeliveryReview) setDeliveryJobId(jobId); }} />}
+      {handoverJobId && <HandoverCheckModal key={`hc${handoverJobId}`} jobId={handoverJobId} onHide={() => setHandoverJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (!stageCompleted) return; if (evDept?.hasDeliveryReview) setDeliveryJobId(jobId); else if (wdDept?.hasWashDelivery) setWashDelJobId(jobId); }} />}
+      {washDelJobId && <WashDeliveryReviewModal key={`wd${washDelJobId}`} jobId={washDelJobId} onHide={() => setWashDelJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted && evDept?.hasFreeInspection) setFreeInspJobId(jobId); }} />}
       {deliveryJobId && <DeliveryReviewModal key={`dr${deliveryJobId}`} jobId={deliveryJobId} onHide={() => setDeliveryJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted && evDept?.hasFreeInspection) setFreeInspJobId(jobId); }} />}
       {invoiceJobId && <InvoiceModal key={`inv${invoiceJobId}`} jobId={invoiceJobId} onHide={() => setInvoiceJobId(null)} />}
       {freeInspJobId && <FreeInspectionModal key={`fi${freeInspJobId}`} jobId={freeInspJobId} onHide={() => setFreeInspJobId(null)} />}
@@ -819,7 +864,10 @@ export default function DepartmentDashboard({ department }) {
         <VehicleEvidenceModal key={evidenceJobId} jobId={evidenceJobId} onHide={() => setEvidenceJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted && drDept?.hasDamageReport) setReportJobId(jobId); }} />
       )}
       {reportJobId && <DamageReportModal key={reportJobId} jobId={reportJobId} onHide={() => setReportJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted && jcDept?.hasJobCheck) setCheckJobId(jobId); }} />}
-      {checkJobId && <VehicleJobCheckModal key={`jc${checkJobId}`} jobId={checkJobId} onHide={() => setCheckJobId(null)} />}
+      {checkJobId && <VehicleJobCheckModal key={`jc${checkJobId}`} jobId={checkJobId} onHide={() => setCheckJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted && tcDept?.hasTeamCheck) setWashTeamJobId(jobId); }} />}
+      {washTeamJobId && <WashTeamInspectionModal key={`tc${washTeamJobId}`} jobId={washTeamJobId} onHide={() => setWashTeamJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted && dcDept?.hasDryingCheck) setDryJobId(jobId); }} />}
+      {dryJobId && <WashDryingAreaModal key={`dc${dryJobId}`} jobId={dryJobId} onHide={() => setDryJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted && icDept?.hasInternalCheck) setIntJobId(jobId); }} />}
+      {intJobId && <WashInternalInspectionModal key={`ic${intJobId}`} jobId={intJobId} onHide={() => setIntJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted && evDept?.hasDeptTransfer) setTransferJobId(jobId); }} />}
       <ComplaintModal
         jobId={complaintJobId}
         startNow={complaintStartNow}

@@ -118,6 +118,91 @@ function EmployeePicker({ value, onChange, employees, disabled, placeholder = "S
   );
 }
 
+
+/* ----------------------------- the "GREAT JOB" celebration (confetti + fanfare + animated popup) ----------------------------- */
+function confetti(ms = 3800) {
+  try {
+    const c = document.createElement("canvas");
+    c.style.cssText = "position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:3000";
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    c.width = window.innerWidth * dpr; c.height = window.innerHeight * dpr;
+    document.body.appendChild(c);
+    const ctx = c.getContext("2d");
+    const W = c.width, H = c.height;
+    const colors = ["#c8102e", "#facc15", "#16a34a", "#2563eb", "#f97316", "#a855f7", "#ffffff", "#111111"];
+    const make = (x, y, vx, vy) => ({ x, y, vx, vy, w: (6 + Math.random() * 8) * dpr, h: (4 + Math.random() * 6) * dpr, rot: Math.random() * 6.28, vr: (Math.random() - 0.5) * 0.4, color: colors[(Math.random() * colors.length) | 0], life: 1 });
+    const parts = [];
+    for (let i = 0; i < 110; i++) {           // two bursts from the bottom corners
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * 0.9;
+      const sp = (14 + Math.random() * 14) * dpr;
+      parts.push(make(0, H, Math.cos(a - 0.5) * sp * 0.9, Math.sin(a) * sp));
+      parts.push(make(W, H, -Math.cos(a - 0.5) * sp * 0.9, Math.sin(a) * sp));
+    }
+    for (let i = 0; i < 90; i++) parts.push(make(Math.random() * W, -Math.random() * H * 0.5, (Math.random() - 0.5) * 3 * dpr, (2 + Math.random() * 4) * dpr)); // rain from the top
+    const t0 = performance.now();
+    const tick = (now) => {
+      const el = now - t0;
+      ctx.clearRect(0, 0, W, H);
+      parts.forEach((p) => {
+        p.vy += 0.38 * dpr; p.vx *= 0.992; p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+        ctx.save(); ctx.globalAlpha = Math.max(0, Math.min(1, (ms - el) / 900));
+        ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.fillStyle = p.color; ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h); ctx.restore();
+      });
+      if (el < ms) requestAnimationFrame(tick); else c.remove();
+    };
+    requestAnimationFrame(tick);
+  } catch (_) { /* the celebration is only decoration */ }
+}
+
+function fanfare() {
+  try {
+    if (localStorage.getItem("notif_muted") === "1") return; // the same mute switch as the notifications
+  } catch (_) { /* ignore */ }
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    const ctx = new AC();
+    [[523.25, 0], [659.25, 0.13], [783.99, 0.26], [1046.5, 0.4], [1318.5, 0.58]].forEach(([f, t]) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = "triangle"; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, ctx.currentTime + t);
+      g.gain.exponentialRampToValueAtTime(0.28, ctx.currentTime + t + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t + 0.45);
+      o.connect(g); g.connect(ctx.destination); o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + 0.5);
+    });
+    setTimeout(() => ctx.close?.(), 1600);
+  } catch (_) { /* ignore */ }
+}
+
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+
+function celebrate({ regNo, jobNo, line }) {
+  confetti(); fanfare();
+  return Swal.fire({
+    html: `
+      <style>
+        .gj { padding: 6px 4px 2px; }
+        .gj-ico { font-size: 76px; line-height: 1; animation: gjPop .7s cubic-bezier(.2,1.6,.4,1) both, gjWiggle 1.6s ease-in-out .7s infinite; display: inline-block; }
+        .gj-title { margin: 6px 0 4px; font-size: 2.6rem; font-weight: 900; letter-spacing: .06em; background: linear-gradient(90deg,#c8102e,#f97316,#facc15,#c8102e); background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: gjPop .6s .15s cubic-bezier(.2,1.6,.4,1) both, gjShine 2.2s linear infinite; }
+        .gj-reg { display: inline-block; padding: 2px 14px; background: #facc15; border: 2px solid #111; border-radius: 8px; font-weight: 800; letter-spacing: .1em; animation: gjPop .5s .35s both; }
+        .gj-job { margin-top: 6px; color: #6b7280; font-weight: 600; animation: gjPop .5s .45s both; }
+        .gj-line { margin-top: 12px; font-size: 1.05rem; color: #111; animation: gjPop .5s .55s both; }
+        @keyframes gjPop { 0% { transform: scale(.2); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+        @keyframes gjWiggle { 0%,100% { transform: rotate(-6deg) scale(1); } 50% { transform: rotate(6deg) scale(1.08); } }
+        @keyframes gjShine { to { background-position: -250% 0; } }
+      </style>
+      <div class="gj">
+        <div class="gj-ico">🏆</div>
+        <div class="gj-title">GREAT JOB!</div>
+        ${regNo ? `<div class="gj-reg">${esc(regNo)}</div>` : ""}
+        ${jobNo ? `<div class="gj-job">${esc(jobNo)}</div>` : ""}
+        ${line ? `<div class="gj-line">${esc(line)}</div>` : ""}
+      </div>`,
+    showConfirmButton: false, timer: 4200, timerProgressBar: true, width: 520,
+    didOpen: (el) => { el.style.zIndex = 2000; },
+  });
+}
+
 export default function FreeInspectionModal({ jobId, onHide, onSaved }) {
   const { data, isLoading, isError, error: loadError } = useGetFreeInspectionQuery(jobId, { skip: !jobId, refetchOnMountOrArgChange: true });
   const [complete, { isLoading: completing }] = useCompleteFreeInspectionMutation();
@@ -154,7 +239,10 @@ export default function FreeInspectionModal({ jobId, onHide, onSaved }) {
     if (!signature) return fail("The Department Head must draw the signature.");
     try {
       const r = await complete({ jobId, explained, willing, schedDate: date, schedTime: time, schedDepartmentId: deptId ? Number(deptId) : undefined, signerName, signatureImage: signature }).unwrap();
-      await Swal.fire({ title: "GREAT JOB", icon: "success", timer: 1800, showConfirmButton: false });
+      await celebrate({
+        regNo: job?.regNo, jobNo: job?.jobNo,
+        line: willing === "YES" ? `Free inspection booked for ${date} at ${time}. Thank you!` : "All done. Thank you!",
+      });
       onSaved?.({ jobId, stageCompleted: Boolean(r.stageCompleted) });
       onHide();
     } catch (ex) { fail(ex?.data?.message || "Could not complete the stage."); }

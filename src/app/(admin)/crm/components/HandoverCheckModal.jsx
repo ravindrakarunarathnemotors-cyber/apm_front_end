@@ -121,7 +121,7 @@ export default function HandoverCheckModal({ jobId, onHide, onSaved }) {
       <Modal.Header closeButton closeVariant="white" className="hc-head">
         <Modal.Title className="fs-5 d-flex align-items-center gap-3 text-white">
           <Icon icon="mdi:car-key" width="30" height="30" />
-          <span>Handover Readiness{job && <span className="fw-normal" style={{ color: "rgba(255,255,255,.75)" }}>{` / ${job.departmentName} Department`}</span>}</span>
+          <span>{job && /wash/i.test(job.departmentName) ? "Delivery Arrangement" : "Handover Readiness"}{job && <span className="fw-normal" style={{ color: "rgba(255,255,255,.75)" }}>{` / ${job.departmentName} Department`}</span>}</span>
         </Modal.Title>
       </Modal.Header>
       <Modal.Body>{body()}</Modal.Body>

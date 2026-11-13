@@ -8,6 +8,10 @@ const freeInspectionApi = apiSlice.injectEndpoints({
       query: (jobId) => `/free_inspection/jobs/${jobId}/free-inspection`,
       providesTags: ["Evidence"],
     }),
+    getScheduledFreeInspections: builder.query({  // the scheduled ones (Job Dashboard panel): ?days
+      query: (days = 60) => `/free_inspection/free-inspections?days=${days}`,
+      providesTags: ["Evidence"],
+    }),
     completeFreeInspection: builder.mutation({    // { jobId, explained, willing, schedDate, schedTime, schedDepartmentId, signerName, signatureImage }
       query: ({ jobId, ...body }) => ({ url: `/free_inspection/jobs/${jobId}/free-inspection/complete`, method: "POST", body }),
       invalidatesTags: ["Evidence", "Jobs"],
@@ -15,4 +19,4 @@ const freeInspectionApi = apiSlice.injectEndpoints({
   }),
 });
 
-export const { useGetFreeInspectionQuery, useCompleteFreeInspectionMutation } = freeInspectionApi;
+export const { useGetFreeInspectionQuery, useCompleteFreeInspectionMutation, useGetScheduledFreeInspectionsQuery } = freeInspectionApi;

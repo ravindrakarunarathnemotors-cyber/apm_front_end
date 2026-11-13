@@ -30,6 +30,14 @@ import PreDepartmentActions from "./PreDepartmentActions"; // Evidence first, th
 import DamageReportModal from "./DamageReportModal"; // stage 8: vehicle damages report (can be skipped)
 import VehicleJobCheckModal from "./VehicleJobCheckModal"; // Wash: Vehicle Job Inspection checklist
 import { useGetJobCheckDepartmentQuery } from "./jobCheckApi";
+import WashTeamInspectionModal from "./WashTeamInspectionModal"; // Wash: Team Self-Inspection
+import { useGetTeamCheckDepartmentQuery } from "./teamCheckApi";
+import WashDryingAreaModal from "./WashDryingAreaModal"; // Wash: Drying Area
+import { useGetDryingCheckDepartmentQuery } from "./dryingCheckApi";
+import WashInternalInspectionModal from "./WashInternalInspectionModal"; // Wash: Internal Inspection 2
+import { useGetInternalCheckDepartmentQuery } from "./internalCheckApi";
+import WashDeliveryReviewModal from "./WashDeliveryReviewModal"; // Wash: Delivery Review + OTP
+import { useGetWashDeliveryDepartmentQuery } from "./washDeliveryApi";
 import { getDepartmentUi } from "./departmentConfig";
 
 const DEPARTMENT_STAGE_NO = 4; // stage 4 = select the department
@@ -47,6 +55,10 @@ export default function JobActionsCell({ job, block = false }) {
   const { data: evDept } = useGetEvidenceDepartmentQuery(dept, skip);
   const { data: drDept } = useGetDamageReportDepartmentQuery(dept, skip);
   const { data: jcDept } = useGetJobCheckDepartmentQuery(dept, skip);
+  const { data: tcDept } = useGetTeamCheckDepartmentQuery(dept, skip);
+  const { data: dcDept } = useGetDryingCheckDepartmentQuery(dept, skip);
+  const { data: icDept } = useGetInternalCheckDepartmentQuery(dept, skip);
+  const { data: wdDept } = useGetWashDeliveryDepartmentQuery(dept, skip);
 
   // Stage 4: the job has no department yet -> "Select Department" (same call as the CRM jobs table)
   const waitingForDepartment = job.status === "IN_PROGRESS" && job.stageNo === DEPARTMENT_STAGE_NO && !job.departmentName;
@@ -63,6 +75,10 @@ export default function JobActionsCell({ job, block = false }) {
   const [bayOpen, setBayOpen] = useState(false);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const [washTeamOpen, setWashTeamOpen] = useState(false); // Wash: Team Self-Inspection
+  const [dryOpen, setDryOpen] = useState(false); // Wash: Drying Area
+  const [intOpen, setIntOpen] = useState(false); // Wash: Internal Inspection 2
+  const [washDelOpen, setWashDelOpen] = useState(false); // Wash: Delivery Review
   const [checkOpen, setCheckOpen] = useState(false); // Wash: Vehicle Job Inspection checklist
   const [inspOpen, setInspOpen] = useState(false);
   const [spareOpen, setSpareOpen] = useState(false);
@@ -132,6 +148,27 @@ export default function JobActionsCell({ job, block = false }) {
     list.push({ key: "jobcheck", label: open ? "Job Inspection" : "Inspection", icon: "mdi:clipboard-check-outline", current: open, run: () => setCheckOpen(true) });
   }
 
+  // Wash: Team Self-Inspection (the stage right after the job inspection)
+  const teamStage = tcDept?.teamCheckStageNo ?? 9;
+  if (tcDept?.hasTeamCheck && job.stageNo >= teamStage && live) {
+    const open = job.stageNo === teamStage;
+    list.push({ key: "teamcheck", label: open ? "Team Inspection" : "Team Check", icon: "mdi:account-group-outline", current: open, run: () => setWashTeamOpen(true) });
+  }
+
+  // Wash: Drying Area (the stage right after the team self-inspection)
+  const dryStage = dcDept?.dryingCheckStageNo ?? 10;
+  if (dcDept?.hasDryingCheck && job.stageNo >= dryStage && live) {
+    const open = job.stageNo === dryStage;
+    list.push({ key: "dryingcheck", label: open ? "Drying Area" : "Drying", icon: "mdi:car-wash", current: open, run: () => setDryOpen(true) });
+  }
+
+  // Wash: Internal Inspection 2 (the stage right after the drying area)
+  const intStage = icDept?.internalCheckStageNo ?? 11;
+  if (icDept?.hasInternalCheck && job.stageNo >= intStage && live) {
+    const open = job.stageNo === intStage;
+    list.push({ key: "internalcheck", label: open ? "Internal Inspection" : "Interior", icon: "mdi:car-seat", current: open, run: () => setIntOpen(true) });
+  }
+
   // Spare Part Review & Order: the spare parts are part of the Vehicle Job Inspection window, so this stage has no button of its own.
   // It is only offered for a job that is still waiting at this stage (saved earlier), so that it can be completed.
   const spareStage = evDept?.spareStageNo;
@@ -193,7 +230,14 @@ export default function JobActionsCell({ job, block = false }) {
   const handoverStage = evDept?.handoverCheckStageNo;
   if (evDept?.hasHandoverCheck && handoverStage && job.stageNo >= handoverStage && live) {
     const open = job.stageNo === handoverStage;
-    list.push({ key: "handover", label: open ? "Handover Check" : "Handover", icon: "mdi:car-key", current: open, run: () => setHandoverOpen(true) });
+    list.push({ key: "handover", label: open ? (/wash/i.test(dept || "") ? "Delivery Arrangement" : "Handover Check") : (/wash/i.test(dept || "") ? "Delivery" : "Handover"), icon: "mdi:car-key", current: open, run: () => setHandoverOpen(true) });
+  }
+
+  // Wash: Delivery Review + OTP (the stage right after the delivery arrangement)
+  const washDelStage = wdDept?.washDeliveryStageNo ?? 14;
+  if (wdDept?.hasWashDelivery && job.stageNo >= washDelStage && live) {
+    const open = job.stageNo === washDelStage;
+    list.push({ key: "washdelivery", label: "Delivery Review", icon: "mdi:car-key", current: open, run: () => setWashDelOpen(true) });
   }
 
   // Delivery Review (after Handover Readiness)
@@ -212,6 +256,10 @@ export default function JobActionsCell({ job, block = false }) {
 
   // Invoice (created when the Customer Approval stage is completed)
   if (evDept?.hasCustomerApproval && evDept.approvalStageNo && job.stageNo > evDept.approvalStageNo && live) {
+    list.push({ key: "invoice", label: "Invoice", icon: "mdi:receipt-text-outline", current: false, run: () => setInvoiceOpen(true) });
+  }
+  // Wash: the invoice is created when the job is started, and the charges are added to it as the stages go on
+  if (/wash/i.test(dept || "") && !evDept?.hasCustomerApproval && job.startedAt && live) {
     list.push({ key: "invoice", label: "Invoice", icon: "mdi:receipt-text-outline", current: false, run: () => setInvoiceOpen(true) });
   }
 
@@ -275,9 +323,10 @@ export default function JobActionsCell({ job, block = false }) {
       {activationOpen && <JobActivationModal key={`ja${job.id}`} jobId={job.id} onHide={() => setActivationOpen(false)} onSaved={({ stageCompleted }) => { if (stageCompleted && evDept?.hasTeamInspection) setTeamInspOpen(true); }} />}
       {teamInspOpen && <TeamInspectionModal key={`ti${job.id}`} jobId={job.id} onHide={() => setTeamInspOpen(false)} onSaved={({ stageCompleted }) => { if (stageCompleted && evDept?.hasTeamReview) setTeamReviewOpen(true); }} />}
       {teamReviewOpen && <TeamReviewModal key={`tr${job.id}`} jobId={job.id} onHide={() => setTeamReviewOpen(false)} onSaved={({ reopened, stageCompleted }) => { if (reopened) setTeamInspOpen(true); else if (stageCompleted && evDept?.hasDeptTransfer) setTransferOpen(true); }} />}
-      {transferOpen && <DeptTransferModal key={`dt${job.id}`} jobId={job.id} onHide={() => setTransferOpen(false)} onSaved={({ stageCompleted }) => { if (stageCompleted && evDept?.hasJobEnd) setJobEndOpen(true); }} />}
+      {transferOpen && <DeptTransferModal key={`dt${job.id}`} jobId={job.id} onHide={() => setTransferOpen(false)} onSaved={({ stageCompleted }) => { if (!stageCompleted) return; if (evDept?.hasJobEnd) setJobEndOpen(true); else if (evDept?.hasHandoverCheck) setHandoverOpen(true); }} />}
       {jobEndOpen && <JobEndModal key={`je${job.id}`} jobId={job.id} onHide={() => setJobEndOpen(false)} onSaved={({ stageCompleted }) => { if (stageCompleted && evDept?.hasHandoverCheck) setHandoverOpen(true); }} />}
-      {handoverOpen && <HandoverCheckModal key={`hc${job.id}`} jobId={job.id} onHide={() => setHandoverOpen(false)} onSaved={({ stageCompleted }) => { if (stageCompleted && evDept?.hasDeliveryReview) setDeliveryOpen(true); }} />}
+      {handoverOpen && <HandoverCheckModal key={`hc${job.id}`} jobId={job.id} onHide={() => setHandoverOpen(false)} onSaved={({ stageCompleted }) => { if (!stageCompleted) return; if (evDept?.hasDeliveryReview) setDeliveryOpen(true); else if (wdDept?.hasWashDelivery) setWashDelOpen(true); }} />}
+      {washDelOpen && <WashDeliveryReviewModal key={`wd${job.id}`} jobId={job.id} onHide={() => setWashDelOpen(false)} onSaved={({ stageCompleted }) => { if (stageCompleted && evDept?.hasFreeInspection) setFreeInspOpen(true); }} />}
       {deliveryOpen && <DeliveryReviewModal key={`dr${job.id}`} jobId={job.id} onHide={() => setDeliveryOpen(false)} onSaved={({ stageCompleted }) => { if (stageCompleted && evDept?.hasFreeInspection) setFreeInspOpen(true); }} />}
       {freeInspOpen && <FreeInspectionModal key={`fi${job.id}`} jobId={job.id} onHide={() => setFreeInspOpen(false)} />}
       {invoiceOpen && <InvoiceModal key={`inv${job.id}`} jobId={job.id} onHide={() => setInvoiceOpen(false)} />}
@@ -291,7 +340,10 @@ export default function JobActionsCell({ job, block = false }) {
         <VehicleEvidenceModal key={job.id} jobId={job.id} onHide={() => setEvidenceOpen(false)} onSaved={({ stageCompleted }) => { if (stageCompleted && hasReport) setReportOpen(true); }} />
       )}
       {reportOpen && <DamageReportModal key={job.id} jobId={job.id} onHide={() => setReportOpen(false)} onSaved={({ stageCompleted }) => { if (stageCompleted && jcDept?.hasJobCheck) setCheckOpen(true); }} />}
-      {checkOpen && <VehicleJobCheckModal key={`jc${job.id}`} jobId={job.id} onHide={() => setCheckOpen(false)} />}
+      {checkOpen && <VehicleJobCheckModal key={`jc${job.id}`} jobId={job.id} onHide={() => setCheckOpen(false)} onSaved={({ stageCompleted }) => { if (stageCompleted && tcDept?.hasTeamCheck) setWashTeamOpen(true); }} />}
+      {washTeamOpen && <WashTeamInspectionModal key={`tc${job.id}`} jobId={job.id} onHide={() => setWashTeamOpen(false)} onSaved={({ stageCompleted }) => { if (stageCompleted && dcDept?.hasDryingCheck) setDryOpen(true); }} />}
+      {dryOpen && <WashDryingAreaModal key={`dc${job.id}`} jobId={job.id} onHide={() => setDryOpen(false)} onSaved={({ stageCompleted }) => { if (stageCompleted && icDept?.hasInternalCheck) setIntOpen(true); }} />}
+      {intOpen && <WashInternalInspectionModal key={`ic${job.id}`} jobId={job.id} onHide={() => setIntOpen(false)} onSaved={({ stageCompleted }) => { if (stageCompleted && evDept?.hasDeptTransfer) setTransferOpen(true); }} />}
       {complaintOpen && (
         <ComplaintModal
           jobId={job.id}

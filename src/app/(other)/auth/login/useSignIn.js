@@ -10,6 +10,13 @@ import { useNotificationContext } from '@/context/useNotificationContext';
 import useQueryParams from '@/hooks/useQueryParams';
 import { useLoginMutation } from '@/store/features/apiSlice';
 
+// Consultants go straight to the Job Dashboard after login, everybody else to the welcome page.
+// Put the role_id of the Consultant role here (role_id column of your roles table). More than one id is fine.
+const CONSULTANT_ROLE_IDS = [2];
+const isConsultant = (result) =>
+  CONSULTANT_ROLE_IDS.map(Number).includes(Number(result?.role_id)) ||
+  /consultant/i.test(String(result?.role_name || result?.role || ""));
+
 const useSignIn = () => {
   const [loading, setLoading] = useState(false);
   const { push } = useRouter();
@@ -51,8 +58,8 @@ const useSignIn = () => {
         if (result.hacc) sessionStorage.setItem("hacc", result.hacc);
       }
 
-      // Redirect
-      const redirectPath = queryParams["redirectTo"] ?? "/welcome_to_client";
+      // Redirect: a ?redirectTo= link wins; otherwise consultant -> Job Dashboard, others -> welcome page
+      const redirectPath = queryParams["redirectTo"] ?? (isConsultant(result) ? "/job-dashboard" : "/welcome_to_client");
       push(redirectPath);
 
       showNotification({

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Badge, Button, Collapse, Form, FormControl, Modal, ProgressBar, Spinner } from "react-bootstrap";
 import { Icon } from "@iconify/react";
 import Swal from "sweetalert2";
+import { useGetEmployeesQuery } from "@/store/features/apiSlice";
 import {
   useAddJobCheckItemMutation,
   useGetJobCheckItemsQuery,
@@ -15,6 +16,112 @@ import { usePermissions } from "./permissionsApi";
 
 // "Vehicle Job Inspection" (Wash): main concern, checklist, Fully Checked + Team Leader signature.
 // Props: jobId (null = closed), onHide, onSaved?({ jobId, stageCompleted })
+
+// hand-drawn signature (mouse / finger / pen). onChange(dataUrl | "")
+function SignaturePad({ onChange, disabled }) {
+  const ref = useRef(null);
+  const drawing = useRef(false);
+  const [inked, setInked] = useState(false);
+  const pos = (e) => {
+    const c = ref.current, r = c.getBoundingClientRect();
+    return [((e.clientX - r.left) * c.width) / r.width, ((e.clientY - r.top) * c.height) / r.height];
+  };
+  const down = (e) => {
+    if (disabled) return;
+    e.preventDefault();
+    ref.current.setPointerCapture?.(e.pointerId);
+    drawing.current = true;
+    const ctx = ref.current.getContext("2d");
+    const [x, y] = pos(e);
+    ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.strokeStyle = "#111827";
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 0.1, y + 0.1); ctx.stroke();
+  };
+  const move = (e) => {
+    if (!drawing.current) return;
+    const ctx = ref.current.getContext("2d");
+    const [x, y] = pos(e);
+    ctx.lineTo(x, y); ctx.stroke();
+  };
+  const up = () => {
+    if (!drawing.current) return;
+    drawing.current = false;
+    setInked(true);
+    onChange(ref.current.toDataURL("image/png"));
+  };
+  const clear = () => {
+    const c = ref.current;
+    c.getContext("2d").clearRect(0, 0, c.width, c.height);
+    setInked(false);
+    onChange("");
+  };
+  return (
+    <div>
+      <canvas
+        ref={ref} width={600} height={160}
+        onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerLeave={up} onPointerCancel={up}
+        style={{ width: "100%", height: 130, border: "1px dashed #94a3b8", borderRadius: 8, background: "#fff", touchAction: "none", cursor: disabled ? "not-allowed" : "crosshair" }}
+      />
+      <div className="d-flex justify-content-between align-items-center mt-1">
+        <span className="small text-muted">{inked ? "Signature captured" : "Sign inside the box (mouse, finger or pen)"}</span>
+        <Button size="sm" variant="outline-secondary" disabled={disabled || !inked} onClick={clear}><Icon icon="mdi:eraser" width="16" height="16" /> Clear</Button>
+      </div>
+    </div>
+  );
+}
+
+// Searchable dropdown of the employees: type to filter by name / employee no / designation, click to pick.
+function EmployeePicker({ value, onChange, employees, disabled, placeholder = "Select the Team Leader" }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");          // what is typed while searching
+  const [typing, setTyping] = useState(false);
+  const boxRef = useRef(null);
+
+  useEffect(() => {
+    const away = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) { setOpen(false); setTyping(false); } };
+    document.addEventListener("mousedown", away);
+    return () => document.removeEventListener("mousedown", away);
+  }, []);
+
+  const q = (typing ? text : "").trim().toLowerCase();
+  const list = employees.filter((e) => !q || [e.name, e.no, e.designation].some((v) => String(v || "").toLowerCase().includes(q)));
+  const pick = (e) => { onChange(e.name); setOpen(false); setTyping(false); setText(""); };
+
+  return (
+    <div ref={boxRef} className="position-relative">
+      <div className="input-group">
+        <span className="input-group-text bg-white"><Icon icon="mdi:account-hard-hat-outline" width="20" height="20" /></span>
+        <FormControl
+          autoComplete="off"
+          disabled={disabled}
+          placeholder={placeholder}
+          value={typing ? text : value}
+          onFocus={() => setOpen(true)}
+          onChange={(e) => { setText(e.target.value); setTyping(true); setOpen(true); }}
+          onKeyDown={(e) => { if (e.key === "Enter" && list.length === 1) { e.preventDefault(); pick(list[0]); } if (e.key === "Escape") { setOpen(false); setTyping(false); } }}
+        />
+        {value && !disabled && (
+          <Button variant="outline-secondary" aria-label="Clear" onClick={() => { onChange(""); setText(""); setTyping(false); }}><Icon icon="mdi:close" width="18" height="18" /></Button>
+        )}
+        <Button variant="outline-secondary" disabled={disabled} aria-label="Open list" onClick={() => setOpen(!open)}><Icon icon={open ? "mdi:chevron-up" : "mdi:chevron-down"} width="20" height="20" /></Button>
+      </div>
+      {open && !disabled && (
+        <div className="position-absolute w-100 bg-white border rounded-3 shadow mt-1" style={{ zIndex: 1055, maxHeight: 240, overflowY: "auto" }}>
+          {list.length === 0 && <div className="p-3 text-muted small">No employee found{q ? ` for "${text.trim()}"` : ""}.</div>}
+          {list.map((e) => (
+            <button key={e.key} type="button" className={`d-flex align-items-center gap-2 w-100 text-start border-0 px-3 py-2 ${e.name === value ? "bg-primary-subtle" : "bg-white"}`} onClick={() => pick(e)}>
+              <span className="d-inline-flex align-items-center justify-content-center rounded-circle bg-body-tertiary flex-shrink-0 fw-semibold" style={{ width: 30, height: 30, fontSize: 12 }}>{String(e.name || "?").trim().slice(0, 1).toUpperCase()}</span>
+              <span className="flex-grow-1">
+                <span className="d-block fw-semibold lh-sm">{e.name}</span>
+                <span className="small text-muted">{[e.designation, e.no].filter(Boolean).join(" · ")}</span>
+              </span>
+              {e.name === value && <Icon icon="mdi:check" width="18" height="18" className="text-primary" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const money = (n) => (n === null || n === undefined ? null : `Rs. ${Number(n).toLocaleString()}`);
 const groupItems = (items) => {
@@ -119,6 +226,14 @@ function CheckForm({ data, onHide, onSaved }) {
   const [checked, setChecked] = useState(() => items.filter((i) => i.checked).map((i) => i.id));
   const [fully, setFully] = useState(Boolean(saved?.fullyChecked));
   const [signName, setSignName] = useState(saved?.signedByName || "");
+  const [signature, setSignature] = useState(""); // PNG data URL of the drawn signature
+  const { data: employeeRows = [] } = useGetEmployeesQuery();
+  // people who have not resigned; team leaders first, then A-Z (a saved signer who has since resigned stays selectable)
+  const people = employeeRows
+    .filter((e) => e.status !== "Resigned")
+    .map((e) => ({ key: e.dbId, name: e.name, no: e.id, designation: e.designation }))
+    .sort((a, b) => (/leader|supervisor/i.test(b.designation || "") - /leader|supervisor/i.test(a.designation || "")) || String(a.name).localeCompare(String(b.name)));
+  const signedAlready = Boolean(saved?.signedAt);
   const [showConcern, setShowConcern] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [error, setError] = useState("");
@@ -145,10 +260,11 @@ function CheckForm({ data, onHide, onSaved }) {
     if (complete) {
       if (!all) return fail("Tick every item of the checklist to complete the inspection.");
       if (!fully) return fail("Switch on “Fully Checked”.");
-      if (!signName.trim()) return fail("Enter the Team Leader name (signature).");
+      if (!signName.trim()) return fail("Select the Team Leader.");
+      if (!signature && !saved?.signatureImage) return fail("The Team Leader must draw the signature.");
     }
     try {
-      const res = await save({ jobId: job.id, checkedItemIds: checked.filter((id) => validIds.has(id)), fullyChecked: complete, signedByName: signName }).unwrap();
+      const res = await save({ jobId: job.id, checkedItemIds: checked.filter((id) => validIds.has(id)), fullyChecked: complete, signedByName: signName, signatureImage: complete && signature ? signature : undefined }).unwrap();
       await Swal.fire({
         title: complete ? "Inspection completed!" : "Saved",
         text: complete ? (res.stageCompleted ? `${job.jobNo} moved to the next stage.` : "Updated.") : "You can complete it later.",
@@ -265,7 +381,14 @@ function CheckForm({ data, onHide, onSaved }) {
             <Form.Check type="switch" id="jc-full" className="fs-4 mb-0" disabled={readOnly || !all} checked={fully} onChange={(e) => { setError(""); setFully(e.target.checked); }} aria-label="Fully Checked" />
           </div>
           <div className="jc-title mb-2"><Icon icon="mdi:draw-pen" width="20" height="20" /> Signature of Team Leader</div>
-          <FormControl placeholder="Team Leader name" value={signName} maxLength={120} disabled={readOnly} onChange={(e) => { setSignName(e.target.value); setError(""); }} />
+          <div className="mb-2"><EmployeePicker value={signName} onChange={(v) => { setSignName(v); setError(""); }} employees={people} disabled={readOnly} /></div>
+          {signedAlready && saved?.signatureImage && !signature && (
+            <div className="mb-2">
+              <img src={saved.signatureImage} alt="Team Leader signature" style={{ maxWidth: "100%", height: 100, border: "1px solid #e3e3e6", borderRadius: 8, background: "#fff" }} />
+              {!readOnly && <div className="small text-muted mt-1">Draw below to replace the signature.</div>}
+            </div>
+          )}
+          {(!signedAlready || !readOnly) && <SignaturePad onChange={(v) => { setSignature(v); setError(""); }} disabled={readOnly} />}
         </div>
       </Modal.Body>
 

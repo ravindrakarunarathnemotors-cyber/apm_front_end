@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { Icon } from "@iconify/react";
 import { useGetDepartmentsQuery } from "@/store/features/apiSlice";
 import { useGetJobsSummaryQuery } from "./jobsPageApi";
+import { useGetScheduledFreeInspectionsQuery } from "./freeInspectionApi";
 
 // Tab bar shared by the Jobs Dashboard (ALL) and every department page. Each tab is a link to that page.
 // Each tab shows the number of jobs still in progress; the number blinks softly, and flashes when it changes.
@@ -18,6 +19,10 @@ export const JOB_TABS = [
   { href: "/accident-repair", label: "Accident Repairs", match: "accident repair", icon: "mdi:car-emergency", color: "#dc2626" },
   { href: "/tyre-center", label: "Tyre Center", match: "tyre center", icon: "mdi:tire", color: "#d97706" },
 ];
+// Extra tab (not a department): the scheduled free inspections. Its number = how many are scheduled.
+const FREE_TAB = { href: "/free-inspections", label: "Free Inspections", match: null, key: "fi", icon: "mdi:calendar-check-outline", color: "#c8102e" };
+
+const SHORT = { "Accident Repairs": "Accident", "Tyre Center": "Tyre", "Free Inspections": "Free Insp." }; // shorter labels on a phone
 
 const CSS = `
 @keyframes jt-blink { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.55; transform:scale(1.12); } }
@@ -29,8 +34,8 @@ const CSS = `
 .jt-nav .nav-item { scroll-snap-align: start; }
 .jt-link { font-size: 17px; padding: 12px 20px; border-radius: 12px; }
 @media (max-width: 767.98px) {
-  .jt-link { font-size: 14px; padding: 8px 12px; border-radius: 10px; gap: 6px !important; }
-  .jt-link svg { width: 20px; height: 20px; }
+  .jt-link { font-size: 13px; padding: 7px 10px; border-radius: 10px; gap: 5px !important; }
+  .jt-link svg { width: 18px; height: 18px; }
   .jt-count { min-width: 22px !important; height: 22px !important; font-size: 12px !important; padding: 0 6px !important; }
 }
 @media (prefers-reduced-motion: reduce) { .jt-count, .jt-count.jt-changed { animation: none; } }
@@ -78,18 +83,20 @@ export default function JobsTabs() {
         href: `/${String(d.name).trim().toLowerCase().replace(/\s+/g, "-")}`,
         label: d.name, match: String(d.name).trim().toLowerCase(), icon: "mdi:domain", color: "#0f766e",
       }));
-    return [...JOB_TABS, ...extra];
+    return [...JOB_TABS, ...extra, FREE_TAB];
   }, [depts]);
 
+  const { data: freeList } = useGetScheduledFreeInspectionsQuery(60, { pollingInterval: 60000 });
+  const freeCount = Array.isArray(freeList) ? freeList.length : 0;
   const counts = useMemo(() => {
     const deps = summary?.departments ?? [];
-    return tabs.map((t) => (t.match ? (deps.find((d) => (d.name || "").toLowerCase() === t.match)?.active ?? 0) : (summary?.active ?? 0)));
-  }, [summary, tabs]);
+    return tabs.map((t) => (t.key === "fi" ? freeCount : t.match ? (deps.find((d) => (d.name || "").toLowerCase() === t.match)?.active ?? 0) : (summary?.active ?? 0)));
+  }, [summary, tabs, freeCount]);
 
   return (
-    <nav className="jt-nav mb-3 overflow-auto" aria-label="Departments">
+    <nav className="jt-nav mb-3" aria-label="Departments">
       <style>{CSS}</style>
-      <ul className="nav nav-pills flex-nowrap gap-2 pb-1 mb-0" style={{ whiteSpace: "nowrap" }}>
+      <ul className="nav nav-pills flex-wrap gap-2 pb-1 mb-0">
         {tabs.map((t, i) => {
           const active = pathname === t.href || pathname.startsWith(`${t.href}/`);
           return (
@@ -104,7 +111,9 @@ export default function JobsTabs() {
                     : { color: t.color, backgroundColor: "#fff" }),
                 }}
               >
-                <Icon icon={t.icon} width="24" height="24" /> {t.label}
+                <Icon icon={t.icon} width="24" height="24" />
+                <span className="d-none d-md-inline">{t.label}</span>
+                <span className="d-md-none">{SHORT[t.label] || t.label}</span>
                 <Count value={counts[i]} light={active} />
               </Link>
             </li>
