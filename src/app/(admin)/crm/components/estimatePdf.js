@@ -39,6 +39,23 @@ export async function savePdf(html, base) {
     holder.innerHTML = `<div id="estdoc" style="width:794px;background:#fff"><style>${css}</style>${parsed.body.innerHTML}</div>`;
     document.body.appendChild(holder);
     const root = holder.querySelector("#estdoc");
+    // The logo is turned into an embedded picture first: html2canvas drops images from another address (the storage server) that do not send CORS headers.
+    // If that fails the company logo of this site (/images/mainlogo.jpeg) is used, and the picture is hidden only when that fails too.
+    const toDataUrl = async (src) => {
+      const res = await fetch(src, { mode: "cors", cache: "force-cache" });
+      if (!res.ok) throw new Error(`image ${res.status}`);
+      const blob = await res.blob();
+      return await new Promise((resolve, reject) => { const fr = new FileReader(); fr.onload = () => resolve(fr.result); fr.onerror = reject; fr.readAsDataURL(blob); });
+    };
+    await Promise.all([...root.querySelectorAll("img")].map(async (im) => {
+      const src = im.getAttribute("src") || "";
+      if (!src || src.startsWith("data:")) return;
+      try { im.src = await toDataUrl(src); }
+      catch (_) {
+        try { im.src = await toDataUrl(`${window.location.origin}/images/mainlogo.jpeg`); }
+        catch (__) { im.style.display = "none"; }
+      }
+    }));
     await Promise.all([...root.querySelectorAll("img")].map((im) => (im.complete ? null : new Promise((r) => { im.onload = r; im.onerror = r; setTimeout(r, 3000); }))));
     const canvas = await window.html2canvas(root, { scale: 2, useCORS: true, backgroundColor: "#ffffff", width: 794, windowWidth: 794, scrollX: 0, scrollY: 0, x: 0, y: 0 });
     const { jsPDF } = window.jspdf;

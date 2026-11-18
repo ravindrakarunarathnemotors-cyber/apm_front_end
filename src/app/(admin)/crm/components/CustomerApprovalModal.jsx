@@ -36,13 +36,22 @@ const DOC_CSS = `@page{size:A4;margin:14mm}
 *{box-sizing:border-box}
 body{font-family:"Segoe UI",Helvetica,Arial,sans-serif;color:var(--ink);margin:0;font-size:12.5px;line-height:1.45;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .page{max-width:794px;margin:0 auto;padding:24px 28px}
-.top{display:flex;justify-content:space-between;align-items:center;padding-bottom:14px;border-bottom:3px solid var(--brand)}
-.top img{height:56px;width:auto;object-fit:contain;display:block}
-.brandname{font-size:19px;font-weight:800;letter-spacing:.1em;color:var(--brand)}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;padding-bottom:14px;border-bottom:3px solid var(--brand)}
+.top > div:first-child{flex:1 1 auto;min-width:0}
+.top > .doc{flex:0 0 auto;max-width:42%}
+.top img{height:56px;width:auto;max-width:120px;object-fit:contain;display:block;flex:0 0 auto}
+.brandname{font-size:16px;font-weight:800;letter-spacing:.05em;line-height:1.25;color:var(--brand);overflow-wrap:anywhere}
 .doc{text-align:right}
-.doc .t{font-size:22px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:var(--brand)}
+.doc .t{font-size:22px;font-weight:700;letter-spacing:.14em;white-space:nowrap;text-transform:uppercase;color:var(--brand)}
 .doc .s{font-size:11px;color:var(--muted);letter-spacing:.12em;text-transform:uppercase}
 .gold{height:3px;background:var(--gold);margin-top:3px}
+.co{overflow-wrap:anywhere;font-size:10.5px;line-height:1.5;color:#57534e;margin-top:3px}
+.dm{margin-top:6px;font-size:11.5px;display:inline-grid;grid-template-columns:auto auto;gap:1px 12px;text-align:left}.dm span{color:var(--muted)}.dm b{text-align:right}
+.parties{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:16px 0 6px;align-items:stretch}
+.box{border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.box h3{margin:0;background:var(--soft);padding:6px 12px;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--brand);border-bottom:1px solid var(--line)}
+.box .b{padding:9px 12px;font-size:12px;line-height:1.6}
+.vg{display:grid;grid-template-columns:auto 1fr;gap:2px 14px}.vg span{color:var(--muted)}
 .meta{display:grid;grid-template-columns:repeat(4,1fr);gap:0;margin:16px 0 4px;border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .meta div{padding:9px 12px;border-right:1px solid var(--line);background:var(--soft)}
 .meta div:last-child{border-right:0}
@@ -193,6 +202,8 @@ export default function CustomerApprovalModal({ jobId, onHide, onSaved }) {
   };
   const fail = (ex, fb) => Swal.fire({ title: "Failed", text: ex?.data?.message || ex?.message || fb, icon: "error" });
   const job = data?.job, ctx = data?.context, saved = data?.saved;
+  // what the customer can bring: the spare parts AND the third-party items (a third-party item is saved as the negative number of its id)
+  const selParts = ctx ? [...ctx.parts, ...(ctx.quotes || []).map((q) => ({ id: -q.id, name: q.description, brand: "Third party", quality: "", qty: 1, isQuote: true }))] : [];
   const readOnly = data && !data.canRecord;
 
   // The form is filled once from the saved data (the saved time stamps keep coming from the server)
@@ -215,7 +226,7 @@ export default function CustomerApprovalModal({ jobId, onHide, onSaved }) {
   const company = { ...DEFAULT_COMPANY, ...(companyData?.company || {}) };
   const { data: termsData } = useGetTermsQuery();   // Settings > Terms & conditions (printed on the estimate)
   const [viewEst, setViewEst] = useState(null);   // estimate preview: null | "full" | "agreed"
-  const [sendSel, setSendSel] = useState({ labour: true, parts: true, time: true });
+  const [sendSel, setSendSel] = useState({ labour: true, parts: true, quotes: true, time: true });
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
   const toggle = (key, v) => setForm((f) => ({ ...f, [key]: f[key].includes(v) ? f[key].filter((x) => x !== v) : [...f[key], v] }));
 
@@ -226,27 +237,34 @@ export default function CustomerApprovalModal({ jobId, onHide, onSaved }) {
     const keyOf = (l) => l.repairType || l.description;
     const labourLines = ctx.labour.filter((l) => !l.warrantyClaim && (form.decision !== "PARTIAL" || form.agreedScope.includes(keyOf(l))));
     const partLines = ctx.parts.filter((p) => !p.warrantyClaim && !(form.partsBy === "CLIENT" && form.clientParts.includes(p.id)));
-    const spareBase = partLines.reduce((s, r) => s + r.qty * r.unitPrice, 0) + ctx.quotes.reduce((s, q) => s + q.quotedPrice, 0);
+    const partsBase = partLines.reduce((s, r) => s + r.qty * r.unitPrice, 0);
+    const quoteLines = ctx.quotes.filter((q) => !(form.partsBy === "CLIENT" && form.clientParts.includes(-q.id)));   // the customer brings it himself: not charged
+    const quotesBase = quoteLines.reduce((s, q) => s + q.quotedPrice, 0);
+    const inclQ = form.includeQuotes ?? form.includeSpareParts;   // third-party quotations can be switched on / off on their own
     const labourBase = labourLines.reduce((s, r) => s + (r.amount || 0), 0);
-    const spare = form.includeSpareParts ? spareBase : 0;
+    const spare = (form.includeSpareParts ? partsBase : 0) + (inclQ ? quotesBase : 0);
     const labour = form.includeLabour ? labourBase : 0;
     const manual = form.manualItems.reduce((s, m) => s + (Number(m.amount) || 0), 0);
     const wash = ctx.washOptions.filter((o) => form.washOptionIds.includes(o.id)).reduce((s, o) => s + o.price, 0);
     // price adjustment (markup %) chosen in the Vehicle Job Inspection: added on spare parts + cost for repair (not on wash)
-    const pct = Number(ctx.markupPercent) || 0;
+    const pct = Number(ctx.markupPercent) || 0;                          // repair + manual lines
+    const spct = Number(ctx.sparePercent ?? ctx.markupPercent) || 0;     // spare parts + quotations have their own %
     // the % is added to the unit price of each line: markup of a line = qty x (unit price + % - unit price)
-    const lineAdj = (q, u) => Math.round((Number(q) || 0) * (Math.round((Number(u) || 0) * (100 + pct)) / 100 - (Number(u) || 0)) * 100) / 100;
-    const spareMkAll = partLines.reduce((s, r) => s + lineAdj(r.qty, r.unitPrice), 0) + ctx.quotes.reduce((s, q) => s + lineAdj(1, q.quotedPrice), 0);
+    const lineAdj = (q, u, pc = pct) => Math.round((Number(q) || 0) * (Math.round((Number(u) || 0) * (100 + pc)) / 100 - (Number(u) || 0)) * 100) / 100;
+    const partsMkAll = partLines.reduce((s, r) => s + lineAdj(r.qty, r.unitPrice, spct), 0);
+    const quotesMkAll = quoteLines.reduce((s, q) => s + lineAdj(1, q.quotedPrice, spct), 0);
     const labourMkAll = labourLines.reduce((s, r) => s + lineAdj(r.qty || 1, r.unitPrice ?? r.amount), 0);
-    const spareMk = form.includeSpareParts ? spareMkAll : 0;
+    const spareMk = (form.includeSpareParts ? partsMkAll : 0) + (inclQ ? quotesMkAll : 0);
     const labourMk = form.includeLabour ? labourMkAll : 0;
     const markup = Math.round((spareMk + labourMk + form.manualItems.reduce((s, m) => s + lineAdj(1, m.amount), 0)) * 100) / 100;
-    return { spare, labour, manual, repair: labour + manual, markup, pct, wash, total: spare + labour + manual + markup + wash,
-      spareAll: Math.round((spareBase + spareMkAll) * 100) / 100, labourAll: Math.round((labourBase + labourMkAll) * 100) / 100 };
+    return { spare, labour, manual, repair: labour + manual, markup, pct, spct, wash, total: spare + labour + manual + markup + wash,
+      spareAll: Math.round((partsBase + partsMkAll + quotesBase + quotesMkAll) * 100) / 100,
+      partsAll: Math.round((partsBase + partsMkAll) * 100) / 100, quotesAll: Math.round((quotesBase + quotesMkAll) * 100) / 100,
+      spareShown: Math.round((spare + spareMk) * 100) / 100, labourAll: Math.round((labourBase + labourMkAll) * 100) / 100 };
   };
   const calc = useMemo(() => computeCalc(form), [form, ctx]); // eslint-disable-line react-hooks/exhaustive-deps
   // The estimate sent to the customer BEFORE the confirmation: every repair selected in the Vehicle Job Inspection and every spare part (no agreement applied yet)
-  const fullOf = (f) => (f ? { ...f, decision: null, agreedScope: [], partsBy: null, clientParts: [], includeSpareParts: sendSel.parts, includeLabour: sendSel.labour } : f);
+  const fullOf = (f) => (f ? { ...f, decision: null, agreedScope: [], partsBy: null, clientParts: [], includeSpareParts: sendSel.parts, includeQuotes: sendSel.quotes, includeLabour: sendSel.labour } : f);
   const calcFull = useMemo(() => computeCalc(fullOf(form)), [form, ctx, sendSel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const dirty = form && JSON.stringify(form) !== snapRef.current;
@@ -358,7 +376,7 @@ export default function CustomerApprovalModal({ jobId, onHide, onSaved }) {
 
   // ---- The spare parts report (the parts the customer brings): same look as the estimate; downloaded as a PDF ----
   const downloadPartsReport = async () => {
-    const chosen = ctx.parts.filter((p) => form.clientParts.includes(p.id));
+    const chosen = selParts.filter((p) => form.clientParts.includes(p.id));
     if (chosen.length === 0) return problem("Tick the spare parts the customer brings first.", "parts");
     const logo = company.logoUrl || `${window.location.origin}/images/mainlogo.jpeg`;
     const today = new Date().toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
@@ -366,7 +384,7 @@ export default function CustomerApprovalModal({ jobId, onHide, onSaved }) {
     const qty = chosen.reduce((t, p) => t + (Number(p.qty) || 0), 0);
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Spare parts report ${esc(job.jobNo)}</title><style>${DOC_CSS}</style></head><body><div class="page">
 <div class="top">
-  <div style="display:flex;align-items:center;gap:12px"><img src="${logo}" alt="" onerror="this.style.display='none'"/><div class="brandname">${esc(company.name)}</div></div>
+  <div style="display:flex;align-items:center;gap:12px"><img src="${logo}" alt="" onerror="this.style.display='none'"/><div class="brandname" style="min-width:0">${esc(company.name)}</div></div>
   <div class="doc"><div class="t">Spare parts report</div><div class="s">Parts provided by the customer</div></div>
 </div><div class="gold"></div>
 <dl class="meta">
@@ -377,7 +395,7 @@ export default function CustomerApprovalModal({ jobId, onHide, onSaved }) {
 </dl>
 <div class="note" style="margin-top:6px">Department: ${esc(job.departmentName)} · Please bring the spare parts listed below to the workshop.</div>
 <h2>Spare parts to bring</h2>
-<table><thead><tr><th class="c" style="color:#fff">#</th><th>Spare part</th><th>Brand</th><th>Quality</th><th ${R}>Qty</th></tr></thead><tbody>${chosen.map((p, n) => `<tr><td class="c">${n + 1}</td><td><b>${esc(p.name)}</b></td><td>${esc(p.brand || "-")}</td><td>${esc(p.quality || "-")}</td><td ${R}><b>${p.qty}</b></td></tr>`).join("")}</tbody></table>
+<table><thead><tr><th class="c" style="color:#fff">#</th><th>Spare part</th><th ${R}>Qty</th></tr></thead><tbody>${chosen.map((p, n) => `<tr><td class="c">${n + 1}</td><td><b>${esc(p.name)}</b></td><td ${R}><b>${p.qty}</b></td></tr>`).join("")}</tbody></table>
 <div class="sum"><div class="g"><span>${chosen.length} item(s)</span><span>Total qty ${qty}</span></div></div>
 <div class="sign"><div>Prepared by</div><div>Customer</div></div>
 <div class="foot">${esc(company.name)} · Thank you for choosing us</div>
@@ -406,39 +424,48 @@ export default function CustomerApprovalModal({ jobId, onHide, onSaved }) {
     const washSel = ctx.washOptions.filter((o) => F.washOptionIds.includes(o.id));
     // only what the customer agreed: the ticked repair items ("Agreed scope only"), and not the spare parts the customer brings himself
     const keyOf = (l) => l.repairType || l.description;
-    const ownParts = F.partsBy === "CLIENT" ? ctx.parts.filter((p) => F.clientParts.includes(p.id)) : [];
+    const ownParts = F.partsBy === "CLIENT" ? selParts.filter((p) => F.clientParts.includes(p.id)) : [];
     const docParts = ctx.parts.filter((p) => !ownParts.includes(p));
+    const docQuotes = ctx.quotes.filter((q) => !ownParts.some((o) => o.id === -q.id));
     const docLabour = ctx.labour.filter((l) => F.decision !== "PARTIAL" || F.agreedScope.includes(keyOf(l)));
     // prices as in the Vehicle Job Inspection: the price adjustment % is already inside each unit price
-    const adjU = (u) => Math.round((Number(u) || 0) * (100 + C.pct)) / 100;
+    const adjU = (u) => Math.round((Number(u) || 0) * (100 + C.pct)) / 100;                     // repair lines
+    const adjS = (u) => Math.round((Number(u) || 0) * (100 + (C.spct ?? C.pct))) / 100;        // spare parts / quotations
     const WC = '<b style="color:#15803d">Warranty claim</b>';
+    const inclQ = F.includeQuotes ?? F.includeSpareParts;   // third-party quotations: only when selected
     const partRows = [
-      ...docParts.map((p, n) => `<tr><td class="c">${n + 1}</td><td><b>${esc(p.name)}</b></td><td>${esc(p.brand || "-")}</td><td ${R}>${p.qty}</td><td ${R}>${p.warrantyClaim ? `<s>${money(adjU(p.unitPrice))}</s>` : money(adjU(p.unitPrice))}</td><td ${R}>${p.warrantyClaim ? WC : `<b>${money(p.qty * adjU(p.unitPrice))}</b>`}</td></tr>`),
-      ...ctx.quotes.map((q, n) => `<tr><td class="c">${docParts.length + n + 1}</td><td><b>${esc(q.description)}</b> (third party)</td><td>-</td><td ${R}>1</td><td ${R}>${money(adjU(q.quotedPrice))}</td><td ${R}><b>${money(adjU(q.quotedPrice))}</b></td></tr>`),
+      ...(F.includeSpareParts ? docParts : []).map((p, n) => `<tr><td class="c">${n + 1}</td><td><b>${esc(p.name)}</b></td><td>${esc(p.brand || "-")}</td><td ${R}>${p.qty}</td><td ${R}>${p.warrantyClaim ? `<s>${money(adjS(p.unitPrice))}</s>` : money(adjS(p.unitPrice))}</td><td ${R}>${p.warrantyClaim ? WC : `<b>${money(p.qty * adjU(p.unitPrice))}</b>`}</td></tr>`),
+      ...(inclQ ? docQuotes : []).map((q, n) => `<tr><td class="c">${(F.includeSpareParts ? docParts.length : 0) + n + 1}</td><td><b>${esc(q.description)}</b> (third party)</td><td>-</td><td ${R}>1</td><td ${R}>${money(adjS(q.quotedPrice))}</td><td ${R}><b>${money(adjS(q.quotedPrice))}</b></td></tr>`),
     ].join("");
     const labourRows = [
       ...(F.includeLabour ? docLabour.map((l) => `<tr><td>${esc(l.description)}${(l.qty || 1) > 1 ? ` × ${l.qty}` : ""}</td><td ${R}>${l.warrantyClaim ? WC : money((l.qty || 1) * adjU(l.unitPrice ?? l.amount))}</td></tr>`) : []),
       ...F.manualItems.map((m) => `<tr><td>${esc(m.description)}</td><td ${R}>${money(m.amount)}</td></tr>`),
     ].join("");
     const time = (full && !sendSel.time) ? "-" : (fmtTime(F.estHours, F.estDays) || "-");
+    // company address / phone / email under the company name, and the vehicle details of the job
+    const coLines = [company.address, [company.phone, company.email].filter(Boolean).join("  ·  "), company.website].filter(Boolean).map((x) => esc(x).replace(/\n/g, "<br/>")).join("<br/>");
+    const vehRows = [
+      ["Vehicle no", job.regNo], ["Chassis no", job.chassisNo], ["Engine no", job.engineNo],
+      ["Year", job.yearOfManufacture], ["Colour", job.colour], ["Mileage", job.mileageKm ? `${Number(job.mileageKm).toLocaleString()} km` : ""], ["Tyre size", job.tyreSize],
+    ].filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== "")
+      .map(([k, v]) => `<span>${k}</span><b>${esc(String(v))}</b>`).join("");
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Estimate ${esc(job.jobNo)}</title><style>${DOC_CSS}</style></head><body><div class="page">
 <div class="top">
-  <div style="display:flex;align-items:center;gap:12px"><img src="${logo}" alt="" onerror="this.style.display='none'"/><div class="brandname">${esc(company.name)}</div></div>
-  <div class="doc"><div class="t">Estimate</div><div class="s">Repair estimation</div></div>
+  <div style="display:flex;align-items:center;gap:12px"><img src="${logo}" alt="" onerror="this.style.display='none'"/><div style="min-width:0"><div class="brandname">${esc(company.name)}</div>${coLines ? `<div class="co">${coLines}</div>` : ""}</div></div>
+  <div class="doc"><div class="t">Estimate</div><div class="s">Repair estimation</div>
+    <div class="dm"><span>Estimate no</span><b>${esc(job.jobNo)}</b><span>Date</span><b>${today}</b>${job.departmentName ? `<span>Department</span><b>${esc(job.departmentName)}</b>` : ""}</div></div>
 </div><div class="gold"></div>
-<dl class="meta">
-  <div><dt>Job</dt><dd>${esc(job.jobNo)}</dd></div>
-  <div><dt>Customer</dt><dd>${esc(job.customerName)}</dd></div>
-  <div><dt>Vehicle no</dt><dd>${esc(job.regNo)}</dd></div>
-  <div><dt>Date</dt><dd>${today}</dd></div>
-</dl>
-<div class="note" style="margin-top:6px">Department: ${esc(job.departmentName)} · Estimated time of repair: <b>${esc(time)}</b> (including spare parts availability)</div>
+<div class="parties">
+  <div class="box"><h3>Customer</h3><div class="b"><b style="font-size:13px">${esc(job.customerName)}</b>${job.customerAddress ? `<br/>${esc(job.customerAddress).replace(/\n/g, "<br/>")}` : ""}${job.contactNumber ? `<br/>Tel: ${esc(job.contactNumber)}` : ""}${job.customerEmail ? `<br/>${esc(job.customerEmail)}` : ""}</div></div>
+  <div class="box"><h3>Vehicle</h3><div class="b"><div class="vg">${vehRows}</div></div></div>
+</div>
+<div class="note" style="margin-top:6px">Estimated time of repair: <b>${esc(time)}</b> (including spare parts availability)</div>
 ${ownParts.length ? `<p class="note"><b>Spare parts provided by the customer (not charged):</b> ${ownParts.map((p) => `${esc(p.name)} × ${p.qty}`).join("; ")}</p>` : ""}
 ${F.decision === "PARTIAL" ? `<p class="note"><b>Agreed scope only</b></p>` : ""}
-${F.includeSpareParts && partRows ? `<h2>Spare parts</h2><table><thead><tr><th class="c" style="color:#fff">#</th><th>Item</th><th>Brand</th><th ${R}>Qty</th><th ${R}>Unit price</th><th ${R}>Total</th></tr></thead><tbody>${partRows}</tbody></table>` : ""}
+${partRows ? `<h2>Spare parts</h2><table><thead><tr><th class="c" style="color:#fff">#</th><th>Item</th><th>Brand</th><th ${R}>Qty</th><th ${R}>Unit price</th><th ${R}>Total</th></tr></thead><tbody>${partRows}</tbody></table>` : ""}
 ${labourRows ? `<h2>Repair &amp; labour</h2>${F.includeLabour && ctx.rootCauses.length ? `<p class="note"><b>Root causes:</b> ${ctx.rootCauses.map(esc).join("; ")}</p>` : ""}<table><thead><tr><th>Work</th><th ${R}>Amount</th></tr></thead><tbody>${labourRows}</tbody></table>` : ""}
 ${washSel.length ? `<h2>Wash</h2><table><thead><tr><th>Wash type</th><th ${R}>Price</th></tr></thead><tbody>${washSel.map((o) => `<tr><td>${esc(o.group ? `${o.group} > ${o.name}` : o.name)}</td><td ${R}>${money(o.price)}</td></tr>`).join("")}</tbody></table>` : ""}
-<div class="sum"><div><span>Spare parts</span><b>${money(F.includeSpareParts ? C.spareAll : 0)}</b></div><div><span>Cost for repair</span><b>${money((F.includeLabour ? C.labourAll : 0) + C.manual)}</b></div>${C.wash > 0 ? `<div><span>Wash</span><b>${money(C.wash)}</b></div>` : ""}<div class="g"><span>Estimated total</span><span>${money(C.total)}</span></div></div>
+<div class="sum"><div><span>Spare parts</span><b>${money(C.spareShown)}</b></div><div><span>Cost for repair</span><b>${money((F.includeLabour ? C.labourAll : 0) + C.manual)}</b></div>${C.wash > 0 ? `<div><span>Wash</span><b>${money(C.wash)}</b></div>` : ""}<div class="g"><span>Estimated total</span><span>${money(C.total)}</span></div></div>
 ${termsHtml(termsData?.terms?.estimate)}
 <div class="sign"><div>Prepared by</div><div>Customer approval</div></div>
 <div class="foot">${esc(company.name)} · Thank you for choosing us</div>
@@ -467,7 +494,7 @@ ${termsHtml(termsData?.terms?.estimate)}
     if (phone === null) return;
     setSmsBusy(true);
     try {
-      const r = await sendSmsApi({ jobId, phone, full: full || undefined, includeSpareParts: full ? sendSel.parts : form.includeSpareParts, includeLabour: full ? sendSel.labour : form.includeLabour, time: (full && !sendSel.time) ? undefined : (fmtTime(form.estHours, form.estDays) || undefined) }).unwrap();
+      const r = await sendSmsApi({ jobId, phone, html: buildEstimateHtml(full), full: full || undefined, includeSpareParts: full ? sendSel.parts : form.includeSpareParts, includeQuotes: full ? sendSel.quotes : undefined, includeLabour: full ? sendSel.labour : form.includeLabour, time: (full && !sendSel.time) ? undefined : (fmtTime(form.estHours, form.estDays) || undefined) }).unwrap();
       if (r.sms?.sent) {
         set({ sentVia: ["SMS"] });
         Swal.fire({ title: "SMS sent", text: r.sms.to ? `Sent to ${r.sms.to}` : "The customer got the estimate.", icon: "success", timer: 1800, showConfirmButton: false });
@@ -535,16 +562,22 @@ ${termsHtml(termsData?.terms?.estimate)}
             .ts-chip:hover:not(:disabled) { border-color: #111; }
             .ts-chip.on { background: #c8102e; border-color: #c8102e; color: #fff; }
             .ts-chip.clr { margin-left: auto; color: #6b7280; font-weight: 600; border-style: dashed; }
+            @media (max-width: 575.98px) {
+              .ts-box { padding: 10px; }
+              .ts-btn { width: 46px; min-height: 48px; }
+              .ts-val input { font-size: 1.45rem; }
+              .ts-chip { min-height: 40px; }
+            }
             .ts-total { margin-top: 12px; display: inline-flex; align-items: center; gap: 8px; background: #111; color: #fff; border-radius: 10px; padding: 6px 14px; font-weight: 700; box-shadow: inset 4px 0 0 #c8102e; }
           `}</style>
           <div className="row g-3">
-            <div className="col-12 col-md-4">
+            <div className="col-12 col-lg-4">
               <TimeStepper label="Days" unit="Days" icon="mdi:calendar-clock-outline" step={1} quick={[1, 2, 3, 5, 7, 10]} disabled={readOnly} value={form.estDays} onChange={(v) => set({ estDays: v })} />
             </div>
-            <div className="col-12 col-md-4">
+            <div className="col-12 col-lg-4">
               <TimeStepper label="Hours" unit="Hrs" icon="mdi:clock-outline" step={1} quick={[1, 2, 3, 4, 6, 8]} disabled={readOnly} value={splitHM(form.estHours)[0] || ""} onChange={(v) => set({ estHours: joinHM(Math.floor(Number(v) || 0), splitHM(form.estHours)[1]) })} />
             </div>
-            <div className="col-12 col-md-4">
+            <div className="col-12 col-lg-4">
               <TimeStepper label="Minutes" unit="Min" icon="mdi:timer-outline" step={5} quick={[10, 15, 30, 45]} disabled={readOnly} value={splitHM(form.estHours)[1] || ""}
                 onChange={(v) => { let m = Math.floor(Number(v) || 0); let [h] = splitHM(form.estHours); if (m >= 60) { h += Math.floor(m / 60); m %= 60; } set({ estHours: joinHM(h, m) }); }} />
             </div>
@@ -561,7 +594,8 @@ ${termsHtml(termsData?.terms?.estimate)}
           <div className="te-row" style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
             {[
               ["labour", "Repair items", `${ctx.labour.filter((l) => !l.warrantyClaim).length} item(s) · ${money(calcFull.labourAll)}`],
-              ["parts", "Spare parts", `${ctx.parts.filter((p) => !p.warrantyClaim).length + ctx.quotes.length} item(s) · ${money(calcFull.spareAll)}`],
+              ["parts", "Spare parts", `${ctx.parts.filter((p) => !p.warrantyClaim).length} item(s) · ${money(calcFull.partsAll)}`],
+              ...(ctx.quotes.length ? [["quotes", "Third-party quotations", `${ctx.quotes.length} item(s) · ${money(calcFull.quotesAll)}`]] : []),
               ["time", "Estimated time", fmtTime(form.estHours, form.estDays) || "Not set"],
             ].map(([k, t, v]) => (
               <button key={k} type="button" role="switch" aria-checked={sendSel[k]} disabled={readOnly} className={`te-chip ${sendSel[k] ? "on" : ""}`} onClick={() => setSendSel((x) => ({ ...x, [k]: !x[k] }))}>
@@ -569,7 +603,7 @@ ${termsHtml(termsData?.terms?.estimate)}
                 <span><small>{t}</small><b>{v}</b></span>
               </button>
             ))}
-            <div className="te-sum"><small>Estimate total{calcFull.pct > 0 ? ` (incl. +${calcFull.pct}%)` : ""}</small><b>{money(calcFull.total)}</b></div>
+            <div className="te-sum"><small>Estimate total{(calcFull.pct > 0 || calcFull.spct > 0) ? ` (incl. repair +${calcFull.pct}% / parts +${calcFull.spct}%)` : ""}</small><b>{money(calcFull.total)}</b></div>
           </div>
           <div className="d-flex flex-wrap align-items-center justify-content-end gap-2 mt-3">
             <Button variant="outline-dark" disabled={!(calcFull.total > 0)} onClick={() => setViewEst("full")}>
@@ -730,15 +764,15 @@ ${termsHtml(termsData?.terms?.estimate)}
             <div className="mt-3 border rounded-3 p-3">
               <div className="d-flex align-items-center gap-2 mb-1">
                 <div className="fw-semibold">The customer brings the spare parts</div>
-                {!readOnly && ctx.parts.length > 0 && (
-                  <button type="button" className="btn btn-sm btn-link ms-auto p-0 text-decoration-none fw-semibold" onClick={() => set({ clientParts: ctx.parts.every((p) => form.clientParts.includes(p.id)) ? [] : ctx.parts.map((p) => p.id) })}>
-                    {ctx.parts.every((p) => form.clientParts.includes(p.id)) ? "Clear all" : "Select all"}
+                {!readOnly && selParts.length > 0 && (
+                  <button type="button" className="btn btn-sm btn-link ms-auto p-0 text-decoration-none fw-semibold" onClick={() => set({ clientParts: selParts.every((p) => form.clientParts.includes(p.id)) ? [] : selParts.map((p) => p.id) })}>
+                    {selParts.every((p) => form.clientParts.includes(p.id)) ? "Clear all" : "Select all"}
                   </button>
                 )}
               </div>
-              <div className="small text-muted mb-2">{ctx.parts.length > 0 ? "Tick the spare parts (from the Vehicle Job Inspection) that the customer provides." : "No spare parts were added in the Vehicle Job Inspection."}</div>
+              <div className="small text-muted mb-2">{selParts.length > 0 ? "Tick the spare parts and third-party items (from the Vehicle Job Inspection) that the customer provides." : "No spare parts were added in the Vehicle Job Inspection."}</div>
               <div className="d-flex flex-column gap-2 mb-3">
-                {ctx.parts.map((p) => {
+                {selParts.map((p) => {
                   const on = form.clientParts.includes(p.id);
                   return (
                     <button key={p.id} type="button" role="checkbox" aria-checked={on} disabled={readOnly} onClick={() => set({ clientParts: on ? form.clientParts.filter((x) => x !== p.id) : [...form.clientParts, p.id] })}
@@ -749,7 +783,7 @@ ${termsHtml(termsData?.terms?.estimate)}
                       </span>
                       <span className="flex-grow-1">
                         <span className="fw-semibold">{p.name}</span>
-                        <span className="d-block small text-muted">{[p.brand, p.quality].filter(Boolean).join(" · ")}{p.brand || p.quality ? " · " : ""}Qty {p.qty}</span>
+                        <span className="d-block small text-muted">{[p.brand, p.quality].filter(Boolean).join(" · ")}{p.brand || p.quality ? " · " : ""}Qty {p.qty}{p.isQuote ? " · quotation item" : ""}</span>
                       </span>
                       {on && <Badge bg="success">Customer provides</Badge>}
                     </button>
@@ -792,7 +826,7 @@ ${termsHtml(termsData?.terms?.estimate)}
           summary={form.sentVia.length ? `Sent via ${VIA.filter(([k]) => form.sentVia.includes(k)).map((v) => v[1]).join(", ")}` : "Not sent to the customer yet"}
           hint={[form.decision === "PARTIAL" ? `Agreed scope: ${ctx.labour.filter((l) => form.agreedScope.includes(l.repairType || l.description)).length} of ${ctx.labour.length} repair item(s)` : form.decision === "TOTAL" ? "Total approved" : "Customer decision not selected yet",
             form.partsBy === "CLIENT" ? `Customer provides ${form.clientParts.length} spare part(s) (not charged)` : null,
-            calc.pct > 0 ? `each line with +${calc.pct}% price adjustment` : null, "warranty claims not charged"].filter(Boolean).join(" · ")}>
+            (calc.pct > 0 || calc.spct > 0) ? `price adjustment: repair +${calc.pct}%, spare parts +${calc.spct}%` : null, "warranty claims not charged"].filter(Boolean).join(" · ")}>
           <style>{`
             .te-row{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch}
             .te-chip{flex:1 1 170px;display:flex;align-items:center;gap:10px;text-align:left;padding:10px 12px;border:1.5px solid #d6d9de;border-radius:12px;background:#fff;color:#374151;cursor:pointer;transition:all .15s}
@@ -836,9 +870,10 @@ ${termsHtml(termsData?.terms?.estimate)}
         </div>
 
         {viewEst && (
-          <Modal show onHide={() => setViewEst(null)} size="xl" centered scrollable>
+          <Modal show onHide={() => setViewEst(null)} size="xl" centered scrollable fullscreen="xl-down" dialogClassName="ca-est-modal">
+            <style>{`@media (max-width: 1199.98px) { .ca-est-modal .ca-est-body { height: calc(100vh - 124px) !important; } }`}</style>
             <Modal.Header closeButton><Modal.Title className="fs-6 d-flex align-items-center gap-2"><Icon icon="mdi:file-document-outline" width="20" height="20" /> Estimate {job.jobNo}</Modal.Title></Modal.Header>
-            <Modal.Body className="p-0" style={{ height: "75vh" }}>
+            <Modal.Body className="p-0 ca-est-body" style={{ height: "75vh" }}>
               <iframe title="Estimate" srcDoc={buildEstimateHtml(viewEst === "full")} style={{ width: "100%", height: "100%", border: 0, background: "#fff" }} />
             </Modal.Body>
             <Modal.Footer><Button variant="light" onClick={() => setViewEst(null)} style={{ border: "1.5px solid #c4c4ca", fontWeight: 600 }}>Close</Button></Modal.Footer>

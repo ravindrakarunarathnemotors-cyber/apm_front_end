@@ -5,6 +5,7 @@ import { Alert, Button, Modal, Spinner } from "react-bootstrap";
 import { Icon } from "@iconify/react";
 import Swal from "sweetalert2";
 import { useActivateJobMutation, useGetJobActivationQuery } from "./jobActivationApi";
+import CancelJobModal from "./CancelJobModal";   // Cancel job (reason + optional inspection fee)
 
 // Job Activation (the stage after "Internal Inspection - 1"): "Are you fully aware of this job?" -> Yes -> the job officially starts.
 // Props: jobId, onHide, onSaved?({ jobId, stageCompleted })
@@ -29,6 +30,7 @@ const Fact = ({ icon, label, children, wide, hot }) => (
 export default function JobActivationModal({ jobId, onHide, onSaved }) {
   const { data, isLoading, isError, error: loadError } = useGetJobActivationQuery(jobId, { skip: !jobId, refetchOnMountOrArgChange: true });
   const [activate, { isLoading: activating }] = useActivateJobMutation();
+  const [cancelOpen, setCancelOpen] = useState(false);
   const [error, setErrorState] = useState("");
   const setError = (m) => { setErrorState(m); if (m) Swal.fire({ title: "Please check", text: m, icon: "error", confirmButtonText: "OK", confirmButtonColor: "#111" }); };
   const job = data?.job, ap = data?.approval;
@@ -84,6 +86,7 @@ export default function JobActivationModal({ jobId, onHide, onSaved }) {
             <Button className="ja-yes" disabled={activating} onClick={yes}>
               {activating ? <Spinner size="sm" /> : <Icon icon="mdi:check-circle-outline" width="26" height="26" />} Yes, I am aware · Start the job
             </Button>
+            <div className="mt-3"><Button variant="outline-danger" className="ja-cancel" onClick={() => setCancelOpen(true)}><Icon icon="mdi:cancel" width="18" height="18" /> Cancel this job</Button></div>
           </div>
         )}
         {error && <Alert variant="danger" className="py-2 mt-3 mb-0">{error}</Alert>}
@@ -115,6 +118,7 @@ export default function JobActivationModal({ jobId, onHide, onSaved }) {
         .ja-modal .ja-rocket { width: 66px; height: 66px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: #fde8ea; color: #c8102e; margin-bottom: 10px; }
         .ja-modal .ja-yes { width: 100%; max-width: 440px; min-height: 58px; border: 0 !important; border-radius: 14px; font-size: 1.1rem; font-weight: 800; color: #fff !important; background: linear-gradient(135deg,#000000 0%,#1c1c1c 50%,#3d3d3d 100%); box-shadow: inset 0 -4px 0 #c8102e, 0 12px 22px -12px rgba(0,0,0,.7); display: inline-flex; align-items: center; justify-content: center; gap: 10px; }
         .ja-modal .ja-yes:hover:not(:disabled) { filter: brightness(1.25); }
+        .ja-modal .ja-cancel { border-radius: 10px; border-width: 1.5px; font-weight: 600; }
         .ja-modal .ja-done { display: flex; align-items: center; gap: 14px; border-radius: 16px; padding: 18px 20px; color: #fff; background: linear-gradient(135deg,#052e16,#15803d 60%,#22c55e); }
       `}</style>
       <Modal.Header closeButton closeVariant="white" className="ja-head">
@@ -125,6 +129,7 @@ export default function JobActivationModal({ jobId, onHide, onSaved }) {
       </Modal.Header>
       <Modal.Body style={{ backgroundColor: "#f6f6f7" }}>{body()}</Modal.Body>
       <Modal.Footer><Button variant="light" onClick={onHide} style={{ border: "1.5px solid #c4c4ca", color: "#111", fontWeight: 600 }}>Close</Button></Modal.Footer>
+      {cancelOpen && job && <CancelJobModal job={{ ...job, id: jobId }} onHide={() => setCancelOpen(false)} onCancelled={() => { onSaved?.({ jobId, stageCompleted: false }); onHide(); }} />}
     </Modal>
   );
 }

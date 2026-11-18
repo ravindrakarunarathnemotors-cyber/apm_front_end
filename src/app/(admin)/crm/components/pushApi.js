@@ -8,7 +8,7 @@ const pushApi = apiSlice.injectEndpoints({
       query: (subscription) => ({ url: `/push/push/subscribe`, method: "POST", body: { subscription } }),
     }),
     // notification history for the top bar bell (job assigned etc.)
-    getMyNotifications: builder.query({ query: () => `/push/my-notifications?limit=30` }),
+    getMyNotifications: builder.query({ query: (limit = 10) => `/push/my-notifications?limit=${limit}` }),
     markMyNotificationsRead: builder.mutation({
       query: (body) => ({ url: `/push/my-notifications/read`, method: "POST", body }), // { ids: [..] } or { all: true }
     }),

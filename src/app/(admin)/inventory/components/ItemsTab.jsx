@@ -13,76 +13,11 @@ import { Empty, Loader, MoveBadge, Panel, StatusBadge, money, qtyFmt, useSend, w
 const Lbl = (t) => <Form.Label className="small text-muted mb-1">{t}</Form.Label>;
 const UPLOAD_URL = `${process.env.NEXT_PUBLIC_BASE_URL}/file/upload`;
 const URL_FIX = ["https://i4i4.fra.idrivee2-52.com", "https://d8y1.c2.e2-9.dev"];   // same storage-host fix as the other windows
+// Categories are main (parentId null) > sub. An item points to ONE category: its sub category when chosen, else the main one.
+const catLabel = (cats, id) => { const c = (cats || []).find((x) => x.id === id); if (!c) return ""; const p = c.parentId ? (cats || []).find((x) => x.id === c.parentId) : null; return p ? `${p.name} > ${c.name}` : c.name; };
 const fail = (ex, fb) => Swal.fire({ title: "Failed", text: ex?.data?.message || fb, icon: "error" });
 
-/* ---------- Add / edit item (General | Compatible vehicles | Alternate part numbers | Batches) ---------- */
-function VehiclesPane({ itemId, draft, setDraft }) {   // itemId = saved item; otherwise draft list is kept until the item is saved
-  const { data: saved, isFetching } = useInvGetQuery(`items/${itemId}/details`, { skip: !itemId });
-  const data = itemId ? saved : { fitments: draft.map((x, i) => ({ ...x, id: i })) };
-  const [send, busy] = useSend();
-  const blank = { make: "", model: "", yearFrom: "", yearTo: "", note: "" };
-  const [f, setF] = useState(blank);
-  const add = async () => {
-    if (!itemId) { if (!f.make.trim() && !f.model.trim()) return; setDraft([...draft, f]); setF(blank); return; }
-    if (await send(`items/${itemId}/fitments`, f)) setF(blank);
-  };
-  const remove = (x) => (itemId ? send(`fitments/${x.id}`, undefined, "DELETE") : setDraft(draft.filter((_, i) => i !== x.id)));
-  return (
-    <>
-      <Row className="g-2 mb-3 align-items-end">
-        <Form.Group as={Col} xs={6} md={3}>{Lbl("Make")}<FormControl placeholder="e.g. Toyota" value={f.make} onChange={(e) => setF({ ...f, make: e.target.value })} /></Form.Group>
-        <Form.Group as={Col} xs={6} md={3}>{Lbl("Model")}<FormControl placeholder="e.g. Axio" value={f.model} onChange={(e) => setF({ ...f, model: e.target.value })} /></Form.Group>
-        <Form.Group as={Col} xs={4} md={2}>{Lbl("Year from")}<FormControl type="number" placeholder="2010" value={f.yearFrom} onChange={(e) => setF({ ...f, yearFrom: e.target.value })} /></Form.Group>
-        <Form.Group as={Col} xs={4} md={2}>{Lbl("Year to")}<FormControl type="number" placeholder="2020" value={f.yearTo} onChange={(e) => setF({ ...f, yearTo: e.target.value })} /></Form.Group>
-        <Col xs={4} md={2} className="d-grid"><Button disabled={busy} onClick={add}><Icon icon="mdi:plus" width="18" height="18" /> Add</Button></Col>
-      </Row>
-      {itemId && isFetching && !data ? <Loader /> : !data?.fitments.length ? <Empty text="No compatible vehicles added yet" icon="mdi:car-outline" /> : (
-        <Table size="sm" className="align-middle mb-0">
-          <thead className="table-light"><tr><th>Make</th><th>Model</th><th>Years</th><th /></tr></thead>
-          <tbody>
-            {data.fitments.map((x) => (
-              <tr key={x.id}><td>{x.make}</td><td>{x.model}</td><td>{x.yearFrom || "any"} – {x.yearTo || "any"}</td>
-                <td className="text-end"><Button size="sm" variant="outline-danger" onClick={() => remove(x)}><Icon icon="mdi:delete-outline" width="16" height="16" /></Button></td></tr>
-            ))}
-          </tbody>
-        </Table>
-      )}
-    </>
-  );
-}
-function AlternatesPane({ itemId, draft, setDraft }) {
-  const { data: saved, isFetching } = useInvGetQuery(`items/${itemId}/details`, { skip: !itemId });
-  const data = itemId ? saved : { alternates: draft.map((x, i) => ({ ...x, id: i })) };
-  const [send, busy] = useSend();
-  const blank = { altPartNo: "", brand: "", kind: "ALTERNATE", note: "" };
-  const [f, setF] = useState(blank);
-  const add = async () => {
-    if (!itemId) { if (!f.altPartNo.trim()) return; setDraft([...draft, f]); setF(blank); return; }
-    if (await send(`items/${itemId}/alternates`, f)) setF(blank);
-  };
-  const remove = (x) => (itemId ? send(`alternates/${x.id}`, undefined, "DELETE") : setDraft(draft.filter((_, i) => i !== x.id)));
-  return (
-    <>
-      <Row className="g-2 mb-3 align-items-end">
-        <Form.Group as={Col} xs={6} md={3}>{Lbl("Part number")}<FormControl placeholder="e.g. 04465-12345" value={f.altPartNo} onChange={(e) => setF({ ...f, altPartNo: e.target.value })} /></Form.Group>
-        <Form.Group as={Col} xs={6} md={3}>{Lbl("Brand")}<FormControl placeholder="e.g. Bosch" value={f.brand} onChange={(e) => setF({ ...f, brand: e.target.value })} /></Form.Group>
-        <Form.Group as={Col} xs={6} md={3}>{Lbl("Type")}<FormSelect value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}><option value="ALTERNATE">Alternate</option><option value="SUPERSEDED">Superseded by</option></FormSelect></Form.Group>
-        <Col xs={6} md={3} className="d-grid"><Button disabled={busy} onClick={add}><Icon icon="mdi:plus" width="18" height="18" /> Add</Button></Col>
-      </Row>
-      {itemId && isFetching && !data ? <Loader /> : !data?.alternates.length ? <Empty text="No alternate part numbers yet" icon="mdi:swap-horizontal" /> : (
-        <Table size="sm" className="align-middle mb-0">
-          <thead className="table-light"><tr><th>Part number</th><th>Brand</th><th>Type</th><th /></tr></thead>
-          <tbody>
-            {data.alternates.map((x) => (
-              <tr key={x.id}><td className="fw-semibold">{x.altPartNo}</td><td>{x.brand || "-"}</td><td><StatusBadge status={x.kind === "SUPERSEDED" ? "Superseded" : "Alternate"} bg={x.kind === "SUPERSEDED" ? "dark" : "info"} /></td>
-                <td className="text-end"><Button size="sm" variant="outline-danger" onClick={() => remove(x)}><Icon icon="mdi:delete-outline" width="16" height="16" /></Button></td></tr>
-            ))}
-          </tbody>
-        </Table>
-      )}
-    </>
-  );
-}
+/* ---------- Add / edit item (General | Batches) ---------- */
 function BatchesPane({ itemId }) {
   const { data, isFetching } = useInvGetQuery(`items/${itemId}/details`);
   if (isFetching && !data) return <Loader />;
@@ -156,6 +91,7 @@ const QualitiesModal = ({ onClose }) => <ManageListModal title="Quality" subtitl
 
 /* Dropdown with a "+ Add new" option. New values are used when the item is saved and then show up in the list for every item. */
 const UNITS = ["Nos", "Pcs", "Set", "Pair", "Kit", "Litre", "ml", "Gallon", "Can", "Bottle", "Drum", "Kg", "g", "Metre", "Roll", "Box", "Packet", "Tube"];
+const COUNTRIES = ["Japan", "Germany", "India", "China", "Thailand", "South Korea", "Malaysia", "Indonesia", "Taiwan", "United Kingdom", "United States", "France", "Italy", "Czech Republic", "Turkey", "Sri Lanka", "UAE", "Vietnam", "Brazil", "Mexico", "Spain", "Poland"];
 const BRANDS = ["Genuine (OEM)", "Toyota", "Nissan", "Honda", "Suzuki", "Mitsubishi", "Mazda", "Bosch", "Denso", "NGK", "Aisin", "KYB", "Monroe", "Brembo", "Akebono", "TRW", "Gates", "Mann", "Mahle", "Hella", "Philips", "Osram", "Castrol", "Mobil", "Shell", "Total", "Valvoline", "Liqui Moly", "Motul", "Michelin", "Bridgestone", "Dunlop", "Yokohama", "DSI", "Exide", "Amaron", "Lucas"];
 function CreatableSelect({ value, onChange, options, extra = [], placeholder, addLabel, icon, onAdd, onManage }) {
   const [adding, setAdding] = useState(false);
@@ -186,6 +122,57 @@ function CreatableSelect({ value, onChange, options, extra = [], placeholder, ad
   );
 }
 
+// The Profit / On cost / Margin strip under the pricing fields is hidden for now. Set to true to show it again.
+const SHOW_PROFIT_STRIP = false;
+const ImSection = ({ icon, title, hint, children }) => (
+  <section className="im-card">
+    <div className="im-card-h"><Icon icon={icon} width="18" height="18" /> {title}{hint && <small>{hint}</small>}</div>
+    {children}
+  </section>
+);
+const IM_CSS = `
+.modal-backdrop.im-blur { background: rgba(15,23,42,.45); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); } .modal-backdrop.im-blur.show { opacity: 1; }
+.modal-dialog.im-dialog { max-width: min(1500px, 97vw); width: 97vw; margin: 1rem auto; } .im-dialog .modal-content { height: calc(100vh - 2rem); border: 0; border-radius: 18px; overflow: hidden; background: #f1f5f9; color: #0f172a; font-family: Inter, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; font-size: 1rem; }
+.im-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 28px; background: #fff; border-bottom: 1px solid #e2e8f0; }
+.im-head-l { display: flex; align-items: center; gap: 12px; min-width: 0; } .im-ic { width: 42px; height: 42px; border-radius: 12px; background: #0f172a; color: #fff; display: grid; place-items: center; flex: none; }
+.im-title { font-weight: 700; font-size: 1.2rem; } .im-sub { color: #64748b; font-size: .82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60vw; }
+.im-x { width: 38px; height: 38px; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; display: grid; place-items: center; cursor: pointer; flex: none; } .im-x:hover { background: #f1f5f9; }
+.im-dialog .modal-body.im-body { padding: 20px 28px 12px; overflow-y: auto; background: #f1f5f9; }
+.im-tabs.nav-tabs { border: 0; gap: 6px; margin-bottom: 14px; } .im-tabs .nav-link { border: 1px solid #cbd5e1; border-radius: 999px; background: #fff; color: #334155; font-weight: 600; padding: 8px 20px; font-size: 1rem; display: inline-flex; align-items: center; gap: 6px; } .im-tabs .nav-link.active { background: #0f172a; border-color: #0f172a; color: #fff; }
+.im-grid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px; align-items: start; }
+.im-main { display: flex; flex-direction: column; gap: 18px; min-width: 0; } .im-side { display: flex; flex-direction: column; gap: 14px; position: sticky; top: 0; }
+.im-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 22px 26px; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+.im-card-h { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 1.05rem; margin-bottom: 18px; } .im-card-h small { color: #94a3b8; font-weight: 500; margin-left: 4px; }
+.im-f { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 18px 18px; align-items: start; }
+.im-f .s3 { grid-column: span 3; } .im-f .s4 { grid-column: span 4; } .im-f .s6 { grid-column: span 6; } .im-f .s12 { grid-column: span 12; }
+.im-lbl { display: block; font-size: .74rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #64748b; margin-bottom: 6px; } .im-lbl i, .im-req i { color: #0f172a; font-style: normal; margin-left: 3px; }
+.im-dialog .form-control, .im-dialog .form-select { height: 46px; border-radius: 10px; border-color: #cbd5e1; font-size: 1rem; box-shadow: none; } .im-dialog textarea.form-control { height: auto; }
+.im-dialog .form-control:focus, .im-dialog .form-select:focus { border-color: #0f172a; box-shadow: 0 0 0 3px rgba(15,23,42,.12); }
+.im-dialog .input-group > .form-control, .im-dialog .input-group > .form-select, .im-dialog .input-group > .btn, .im-dialog .input-group-text { height: 46px; } .im-dialog .input-group-text { background: #f8fafc; border-color: #cbd5e1; }
+.im-add { display: flex; gap: 6px; } .im-add > .form-control, .im-add > .form-select { flex: 1 1 auto; min-width: 0; }
+.im-ibtn { width: 46px; height: 46px; flex: none; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; display: grid; place-items: center; cursor: pointer; color: #0f172a; } .im-ibtn:hover:not(:disabled) { background: #f1f5f9; } .im-ibtn:disabled { opacity: .45; cursor: not-allowed; } .im-ibtn.ok { background: #0f172a; color: #fff; border-color: #0f172a; }
+.im-money { display: flex; align-items: center; height: 46px; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; overflow: hidden; } .im-money:focus-within { border-color: #0f172a; box-shadow: 0 0 0 3px rgba(15,23,42,.12); }
+.im-money > span { padding: 0 10px; color: #64748b; font-size: .8rem; font-weight: 600; background: #f8fafc; height: 100%; display: grid; place-items: center; border-right: 1px solid #e2e8f0; }
+.im-money input { flex: 1 1 auto; min-width: 0; border: 0; outline: 0; padding: 0 12px; height: 100%; font-size: 1rem; background: transparent; } .im-money input:disabled { background: #f1f5f9; }
+.im-seg { display: inline-flex; height: 100%; border-left: 1px solid #e2e8f0; } .im-seg button { border: 0; background: #f8fafc; padding: 0 12px; font-weight: 700; color: #475569; cursor: pointer; } .im-seg button.on { background: #0f172a; color: #fff; }
+.im-profit { display: flex; gap: 22px; flex-wrap: wrap; padding: 10px 14px; border-radius: 12px; background: #f1f5f9; } .im-profit span small { display: block; font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; color: #64748b; font-weight: 700; } .im-profit b { font-size: 1rem; } .im-profit.pos b { color: #15803d; } .im-profit.neg b { color: #b45309; }
+.im-hint { color: #94a3b8; font-size: .78rem; margin-top: 4px; }
+.im-switch { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid #e2e8f0; border-radius: 12px; cursor: pointer; margin: 0; background: #f8fafc; height: 100%; }
+.im-switch input { position: absolute; opacity: 0; } .im-switch i { width: 38px; height: 22px; border-radius: 999px; background: #cbd5e1; position: relative; flex: none; transition: background .15s; }
+.im-switch i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .15s; box-shadow: 0 1px 3px rgba(0,0,0,.25); } .im-switch input:checked + i { background: #0f172a; } .im-switch input:checked + i::after { transform: translateX(16px); }
+.im-switch input:focus-visible + i { box-shadow: 0 0 0 3px rgba(15,23,42,.25); } .im-switch span b { display: block; font-weight: 600; } .im-switch span small { color: #64748b; }
+.im-photo { text-align: center; } .im-photo img { max-width: 100%; max-height: 190px; object-fit: contain; border-radius: 10px; } .im-link { display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; color: #475569; margin-top: 8px; cursor: pointer; } .im-link:hover { color: #0f172a; text-decoration: underline; }
+.im-drop { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; padding: 26px 10px; border: 2px dashed #cbd5e1; border-radius: 14px; color: #64748b; cursor: pointer; margin: 0; } .im-drop:hover { border-color: #0f172a; background: #f8fafc; } .im-drop b { color: #0f172a; font-weight: 600; font-size: .9rem; } .im-drop small { font-size: .76rem; }
+.im-preview { background: linear-gradient(145deg, #0f172a, #1e293b); border: 0; color: #fff; } .im-preview .im-card-h { color: #e2e8f0; }
+.im-pname { font-size: 1.2rem; font-weight: 700; overflow-wrap: anywhere; } .im-pmeta { color: #cbd5e1; font-size: .82rem; margin: 2px 0 12px; } .im-ph { color: #64748b; font-weight: 500; }
+.im-prow { display: flex; justify-content: space-between; padding: 6px 0; border-top: 1px solid rgba(255,255,255,.12); color: #cbd5e1; font-size: .86rem; } .im-prow b { color: #fff; font-variant-numeric: tabular-nums; } .im-preview .im-hint { color: #94a3b8; }
+.im-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 28px; background: #fff; border-top: 1px solid #e2e8f0; } .im-req { color: #64748b; font-size: .82rem; } .im-foot-r { display: flex; gap: 8px; }
+.im-btn { height: 46px; padding: 0 26px; font-size: 1rem; border: 0; border-radius: 10px; background: #0f172a; color: #fff; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; } .im-btn:hover:not(:disabled) { background: #1e293b; } .im-btn:disabled { opacity: .5; cursor: not-allowed; } .im-btn.ghost { background: #fff; color: #0f172a; border: 1px solid #cbd5e1; } .im-btn.ghost:hover { background: #f1f5f9; }
+@media (max-width: 991px) { .im-grid { grid-template-columns: 1fr; } .im-side { position: static; } .im-f .s3, .im-f .s4 { grid-column: span 6; } }
+@media (max-width: 1199px) { .im-grid { grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; } }
+@media (max-width: 575px) { .modal-dialog.im-dialog { width: 100vw; margin: 0; max-width: none; } .im-dialog .modal-content { height: 100vh; border-radius: 0; } .im-dialog .modal-body.im-body { padding: 12px; } .im-head, .im-foot { padding: 12px 14px; } .im-f .s3, .im-f .s4, .im-f .s6 { grid-column: span 12; } .im-card { padding: 14px; } }
+`;
+
 function ItemModal({ item, lookups, onClose }) {
   const [addItem, { isLoading: adding }] = useAddInventoryItemMutation();
   const [updateItem, { isLoading: saving }] = useUpdateInventoryItemMutation();
@@ -195,27 +182,50 @@ function ItemModal({ item, lookups, onClose }) {
   const [uploading, setUploading] = useState(false);
   const [mMode, setMMode] = useState("pct");   // profit entry mode: "pct" (% on cost) | "amt" (Rs.)
   const [mv, setMv] = useState(null);          // text typed in the profit box (null = show the value worked out from cost & price)
-  const [fits, setFits] = useState([]);   // compatible vehicles / alternate numbers entered before the item is saved
-  const [alts, setAlts] = useState([]);
+  const cats = lookups.categories || [];
+  const { refetch: refetchLookups } = useGetInventoryLookupsQuery();
+  const startCat = cats.find((c) => c.id === item?.categoryId);
+  const [mainId, setMainId] = useState(() => (startCat?.parentId ? startCat.parentId : item?.categoryId || cats.find((c) => !c.parentId)?.id || ""));
+  const [subId, setSubId] = useState(() => (startCat?.parentId ? startCat.id : ""));
+  const [addCat, setAddCat] = useState(null);        // null | "main" | "sub"  (typing a new category name)
+  const [catText, setCatText] = useState("");
+  const [pendingCat, setPendingCat] = useState(null); // { name, level } selected as soon as the refreshed list has it
+  useEffect(() => {
+    if (!pendingCat) return;
+    const c = cats.find((x) => x.name.toLowerCase() === pendingCat.name.toLowerCase());
+    if (!c) return;
+    if (pendingCat.level === "main") { setMainId(c.id); setSubId(""); } else setSubId(c.id);
+    setPendingCat(null);
+  }, [cats, pendingCat]);
+  const subs = cats.filter((c) => c.parentId === Number(mainId));
+  const confirmCat = async () => {
+    const name = catText.trim();
+    if (!name) return;
+    if (addCat === "sub" && !mainId) return fail({ data: { message: "Select the main category first." } }, "");
+    const ok = await send("categories", { name, ...(addCat === "sub" ? { parentId: Number(mainId) } : {}) });
+    if (ok === null || ok === false) return;
+    setPendingCat({ name, level: addCat }); setCatText(""); setAddCat(null); refetchLookups();
+  };
   const [form, setForm] = useState(() => ({
     name: item?.name || "", partNo: item?.partNo || "", oemNo: item?.oemNo || "", sku: item?.sku || "", barcode: item?.barcode || "",
-    categoryId: item?.categoryId || lookups.categories[0]?.id || "", brand: item?.brand || "", quality: item?.quality || "Standard", unit: item?.unit || "Nos",
+    categoryId: "", brand: item?.brand || "", quality: item?.quality || "Standard", unit: item?.unit || "Nos",
     price: item?.price ?? "", costPrice: item?.costPrice ?? "", reorderLevel: item?.reorderLevel ?? 0, reorderQty: item?.reorderQty ?? 0,
-    binLocation: item?.binLocation || "", description: item?.description || "", imageUrl: item?.imageUrl || "", supplierId: item?.supplierId || "", trackBatch: !!item?.trackBatch, isActive: item?.isActive !== false,
+    binLocation: item?.binLocation || "", manufacturer: item?.manufacturer || "", country: item?.country || "", hsCode: item?.hsCode || "", qrCode: item?.qrCode || "", warrantyMonths: item?.warrantyMonths ?? "", classification: item?.classification || "", dailyDemand: item?.dailyDemand ?? "", leadTimeDays: item?.leadTimeDays ?? "", safetyStock: item?.safetyStock ?? "", rackNo: item?.rackNo || "", rackRow: item?.rackRow || "", description: item?.description || "", imageUrl: item?.imageUrl || "", supplierId: item?.supplierId || "", trackBatch: !!item?.trackBatch, isActive: item?.isActive !== false,
   }));
+  const [codeTouched, setCodeTouched] = useState(() => !!item?.binLocation && item.binLocation !== [item?.rackNo, item?.rackRow].filter(Boolean).join("-"));   // true once the code is typed by hand
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
+  const setRack = (k) => (v) => {          // rack number / row: the location code follows them until it is typed by hand
+    setForm((f) => { const n = { ...f, [k]: v }; if (!codeTouched) n.binLocation = [n.rackNo, n.rackRow].map((x) => String(x).trim()).filter(Boolean).join("-"); return n; });
+  };
   const save = async () => {
     try {
-      if (item) await updateItem({ id: item.id, ...form }).unwrap();
-      else {
-        const r = await addItem(form).unwrap();
-        for (const x of fits) await send(`items/${r.id}/fitments`, x);
-        for (const x of alts) await send(`items/${r.id}/alternates`, x);
-      }
+      const payload = { ...form, categoryId: subId || mainId, ...(ropOn ? { reorderLevel: rop } : {}) };
+      if (!payload.categoryId) return fail({ data: { message: "Select the category." } }, "");
+      if (item) await updateItem({ id: item.id, ...payload }).unwrap();
+      else await addItem(payload).unwrap();
       onClose();
     } catch (ex) { fail(ex, "Could not save the item."); }
   };
-  const L = Lbl;
   const pickImage = async (e) => {
     const file = e.target.files?.[0]; e.target.value = "";
     if (!file) return;
@@ -230,8 +240,6 @@ function ItemModal({ item, lookups, onClose }) {
       setForm((f) => ({ ...f, imageUrl: URL_FIX[0] ? up.fileUrl.replace(URL_FIX[0], URL_FIX[1]) : up.fileUrl }));
     } catch (ex) { fail({ data: { message: ex.message } }, "Upload failed"); } finally { setUploading(false); }
   };
-  const Ic = ({ icon, color }) => <InputGroup.Text className="bg-light"><Icon icon={icon} width="18" height="18" color={color} /></InputGroup.Text>;
-  const Section = ({ icon, title }) => <Col xs={12}><div className="d-flex align-items-center gap-2 text-muted fw-semibold small text-uppercase mt-2"><Icon icon={icon} width="16" height="16" />{title}<hr className="flex-grow-1 m-0 ms-2" /></div></Col>;
   const cost = Number(form.costPrice) || 0, sell = Number(form.price) || 0;
   const profitAmt = sell > 0 && cost > 0 ? sell - cost : null;
   const profitPct = profitAmt !== null ? (profitAmt / cost) * 100 : null;
@@ -243,119 +251,178 @@ function ItemModal({ item, lookups, onClose }) {
     const price = mMode === "pct" ? cost * (1 + n / 100) : cost + n;
     setForm((f) => ({ ...f, price: String(Math.max(0, Math.round(price * 100) / 100)) }));
   };
+  // Reorder point: ROP = (daily demand x supplier lead time) + safety stock. With daily demand and lead time filled the level follows the formula.
+  const ropOn = form.dailyDemand !== "" && form.leadTimeDays !== "" && Number(form.dailyDemand) >= 0 && Number(form.leadTimeDays) >= 0;
+  const rop = ropOn ? Math.ceil(Number(form.dailyDemand) * Number(form.leadTimeDays) + (Number(form.safetyStock) || 0)) : null;
+  const canSave = form.name.trim() && (subId || mainId);
+  const lbl = (t, req) => <label className="im-lbl">{t}{req && <i>*</i>}</label>;
+  const catBox = (level) => {
+    const main = level === "main";
+    if (addCat === level) {
+      return (
+        <div className="im-add">
+          <input autoFocus className="form-control" value={catText} onChange={(e) => setCatText(e.target.value)} placeholder={main ? "New main category" : "New sub category"} autoComplete="off"
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); confirmCat(); } if (e.key === "Escape") setAddCat(null); }} />
+          <button type="button" className="im-ibtn ok" onClick={confirmCat} title="Add"><Icon icon="mdi:check" width="18" height="18" /></button>
+          <button type="button" className="im-ibtn" onClick={() => { setAddCat(null); setCatText(""); }} title="Cancel"><Icon icon="mdi:close" width="18" height="18" /></button>
+        </div>
+      );
+    }
+    return (
+      <div className="im-add">
+        {main ? (
+          <FormSelect value={mainId} onChange={(e) => { setMainId(e.target.value === "" ? "" : Number(e.target.value)); setSubId(""); }}>
+            {mainId && !cats.some((c) => c.id === Number(mainId)) && <option value={mainId}>{item?.categoryName || "Category"} (hidden)</option>}
+            {!mainId && <option value="">Select main category</option>}
+            {cats.filter((c) => !c.parentId).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </FormSelect>
+        ) : (
+          <FormSelect value={subId} onChange={(e) => setSubId(e.target.value === "" ? "" : Number(e.target.value))} disabled={!mainId}>
+            <option value="">{subs.length ? "None" : "No sub categories yet"}</option>
+            {subs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </FormSelect>
+        )}
+        <button type="button" className="im-ibtn" disabled={!main && !mainId} onClick={() => setAddCat(level)} title={main ? "Add a main category" : "Add a sub category"}><Icon icon="mdi:plus" width="18" height="18" /></button>
+      </div>
+    );
+  };
   return (
-    <Modal show onHide={onClose} size="xl" centered scrollable enforceFocus={false}>
-      <Modal.Header closeButton>
-        <Modal.Title className="fs-5 d-flex align-items-center gap-2">
-          <span className="d-inline-flex align-items-center justify-content-center rounded-circle bg-primary-subtle text-primary" style={{ width: 40, height: 40 }}><Icon icon={item ? "mdi:package-variant-closed" : "mdi:package-variant-plus"} width="22" height="22" /></span>
-          <span>{item ? "Edit item" : "Add item"}{item && <div className="small text-muted fw-normal">{item.name}</div>}</span>
-        </Modal.Title>
-      </Modal.Header>
-      <Modal.Body>
-        <Tabs defaultActiveKey="general" className="mb-3" mountOnEnter>
+    <Modal show onHide={onClose} size="xl" centered scrollable enforceFocus={false} dialogClassName="im-dialog" backdropClassName="im-blur">
+      <style>{IM_CSS}</style>
+      <div className="im-head">
+        <div className="im-head-l">
+          <span className="im-ic"><Icon icon={item ? "mdi:package-variant-closed" : "mdi:package-variant-plus"} width="22" height="22" /></span>
+          <div><div className="im-title">{item ? "Edit item" : "Add item"}</div><div className="im-sub">{item ? item.name : "Create a new item in the Item Master"}</div></div>
+        </div>
+        <button type="button" className="im-x" onClick={onClose} aria-label="Close"><Icon icon="mdi:close" width="20" height="20" /></button>
+      </div>
+      <Modal.Body className="im-body">
+        <Tabs defaultActiveKey="general" className="im-tabs" mountOnEnter>
           <Tab eventKey="general" title={<><Icon icon="mdi:clipboard-text-outline" width="16" height="16" /> General</>}>
-            <Accordion alwaysOpen defaultActiveKey={["basic", "pricing"]} className="mb-2">
-            <Accordion.Item eventKey="basic">
-              <Accordion.Header><Icon icon="mdi:tag-outline" width="20" height="20" className="me-2 text-primary" /><span><span className="fw-semibold">Basic details</span><div className="small text-muted fw-normal">Name, category, part no, brand, unit</div></span></Accordion.Header>
-              <Accordion.Body><Row className="g-3">
-              <Form.Group as={Col} md={8}>{L("Item name *")}<InputGroup><Ic icon="mdi:cube-outline" /><FormControl value={form.name} onChange={set("name")} placeholder="e.g. Brake pad set - front" autoComplete="off" autoFocus /></InputGroup></Form.Group>
-              <Form.Group as={Col} md={4}>
-                {L("Category *")}
-                <InputGroup><Ic icon="mdi:shape-outline" /><FormSelect value={form.categoryId} onChange={set("categoryId")}>{item && !lookups.categories.some((c) => c.id === item.categoryId) && <option value={item.categoryId}>{item.categoryName} (hidden)</option>}{lookups.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</FormSelect></InputGroup>
-              </Form.Group>
-              <Form.Group as={Col} md={4}>{L("Part number (OEM)")}<InputGroup><Ic icon="mdi:pound" /><FormControl value={form.partNo} onChange={set("partNo")} autoComplete="off" /></InputGroup></Form.Group>
-              <Form.Group as={Col} md={4}>{L("Internal SKU")}<InputGroup><Ic icon="mdi:identifier" /><FormControl value={form.sku} onChange={set("sku")} autoComplete="off" /></InputGroup></Form.Group>
-              <Form.Group as={Col} md={4}>{L("Barcode")}<InputGroup><Ic icon="mdi:barcode" /><FormControl value={form.barcode} onChange={set("barcode")} autoComplete="off" /></InputGroup></Form.Group>
-              <Form.Group as={Col} md={4}>
-                {L("Brand")}
-                <CreatableSelect value={form.brand} onChange={(v) => setForm((f) => ({ ...f, brand: v }))} options={BRANDS} extra={lookups.brands} placeholder="Select brand" addLabel="New brand name" icon="mdi:star-circle-outline" />
-              </Form.Group>
-              <Form.Group as={Col} md={4}>
-                {L("Quality")}
-                <CreatableSelect value={form.quality} onChange={(v) => setForm((f) => ({ ...f, quality: v }))} options={["Standard", ...lookups.qualities]} placeholder="Select quality" addLabel="New quality (e.g. Aftermarket)" icon="mdi:medal-outline" onAdd={(v) => addOption("QUALITY", v)} onManage={() => setManage("QUALITY")} />
-              </Form.Group>
-              <Form.Group as={Col} md={4}>
-                {L("Unit of measure")}
-                <CreatableSelect value={form.unit} onChange={(v) => setForm((f) => ({ ...f, unit: v }))} options={lookups.units?.length ? lookups.units : UNITS} placeholder="Select unit" addLabel="New unit (e.g. Drum)" icon="mdi:ruler" onAdd={(v) => addOption("UNIT", v)} onManage={() => setManage("UNIT")} />
-              </Form.Group>
+            <div className="im-grid">
+              <div className="im-main">
+                <ImSection icon="mdi:tag-outline" title="Basic details" hint="What the item is and how to find it">
+                  <div className="im-f">
+                    <div className="s12">{lbl("Item name", true)}<FormControl value={form.name} onChange={set("name")} placeholder="e.g. Brake pad set - front" autoComplete="off" autoFocus /></div>
+                    <div className="s6">{lbl("Main category", true)}{catBox("main")}</div>
+                    <div className="s6">{lbl("Sub category")}{catBox("sub")}</div>
+                    <div className="s4">{lbl("Part number (OEM)")}<FormControl value={form.partNo} onChange={set("partNo")} autoComplete="off" /></div>
+                    <div className="s4">{lbl("Internal SKU")}<FormControl value={form.sku} onChange={set("sku")} autoComplete="off" /></div>
+                    <div className="s4">{lbl("Barcode")}<FormControl value={form.barcode} onChange={set("barcode")} autoComplete="off" /></div>
+                    <div className="s4">{lbl("Brand")}<CreatableSelect value={form.brand} onChange={(v) => setForm((f) => ({ ...f, brand: v }))} options={BRANDS} extra={lookups.brands} placeholder="Select brand" addLabel="New brand name" icon="mdi:star-circle-outline" /></div>
+                    <div className="s4">{lbl("Quality")}<CreatableSelect value={form.quality} onChange={(v) => setForm((f) => ({ ...f, quality: v }))} options={["Standard", ...lookups.qualities]} placeholder="Select quality" addLabel="New quality (e.g. Aftermarket)" icon="mdi:medal-outline" onAdd={(v) => addOption("QUALITY", v)} onManage={() => setManage("QUALITY")} /></div>
+                    <div className="s4">{lbl("Unit of measure")}<CreatableSelect value={form.unit} onChange={(v) => setForm((f) => ({ ...f, unit: v }))} options={lookups.units?.length ? lookups.units : UNITS} placeholder="Select unit" addLabel="New unit (e.g. Drum)" icon="mdi:ruler" onAdd={(v) => addOption("UNIT", v)} onManage={() => setManage("UNIT")} /></div>
+                    <div className="s12">{lbl("Material classification")}<CreatableSelect value={form.classification} onChange={(v) => setForm((f) => ({ ...f, classification: v }))} options={[]} extra={lookups.classifications || []} placeholder="Select classification" addLabel="New classification (e.g. Genuine part, Consumable)" icon="mdi:sitemap-outline" /></div>
+                  </div>
+                </ImSection>
 
-            </Row></Accordion.Body></Accordion.Item>
-            <Accordion.Item eventKey="pricing">
-              <Accordion.Header><Icon icon="mdi:cash-multiple" width="20" height="20" className="me-2 text-primary" /><span><span className="fw-semibold">Pricing</span><div className="small text-muted fw-normal">Cost, profit, selling price and supplier</div></span></Accordion.Header>
-              <Accordion.Body><Row className="g-3">
-              <Form.Group as={Col} xs={6} md={4}>{L("Cost price")}<InputGroup><InputGroup.Text className="bg-light small">Rs.</InputGroup.Text><FormControl type="number" min="0" value={form.costPrice} onChange={(e) => { setMv(null); set("costPrice")(e); }} /></InputGroup></Form.Group>
-              <Form.Group as={Col} xs={6} md={4}>{L("Selling price")}<InputGroup><InputGroup.Text className="bg-light small">Rs.</InputGroup.Text><FormControl type="number" min="0" value={form.price} onChange={(e) => { setMv(null); set("price")(e); }} /></InputGroup></Form.Group>
-              <Form.Group as={Col} xs={12} md={4}>
-                {L("Profit - sets the selling price")}
-                <InputGroup>
-                  <Ic icon="mdi:trending-up" color="#198754" />
-                  <FormControl type="number" min="0" step="any" value={mv ?? derived} onChange={(e) => setProfit(e.target.value)} disabled={cost <= 0} placeholder={cost <= 0 ? "Enter cost first" : "0"} />
-                  <Button variant={mMode === "pct" ? "primary" : "outline-secondary"} onClick={() => { setMMode("pct"); setMv(null); }}>%</Button>
-                  <Button variant={mMode === "amt" ? "primary" : "outline-secondary"} onClick={() => { setMMode("amt"); setMv(null); }}>Rs.</Button>
-                </InputGroup>
-                {profitAmt !== null && <small className={profitAmt >= 0 ? "text-success" : "text-danger"}>Profit Rs. {profitAmt.toFixed(2)} · {profitPct.toFixed(1)}% on cost · margin {((profitAmt / sell) * 100).toFixed(1)}% of price</small>}
-              </Form.Group>
+                <ImSection icon="mdi:shield-check-outline" title="Origin, codes & warranty" hint="Optional: manufacturer, customs and warranty details">
+                  <div className="im-f">
+                    <div className="s6">{lbl("Manufacturer")}<CreatableSelect value={form.manufacturer} onChange={(v) => setForm((f) => ({ ...f, manufacturer: v }))} options={[]} extra={lookups.manufacturers || []} placeholder="Select manufacturer" addLabel="New manufacturer name" icon="mdi:factory" /></div>
+                    <div className="s6">{lbl("Country of origin")}<CreatableSelect value={form.country} onChange={(v) => setForm((f) => ({ ...f, country: v }))} options={COUNTRIES} extra={lookups.countries || []} placeholder="Select country" addLabel="New country" icon="mdi:earth" /></div>
+                    <div className="s4">{lbl("HS code")}<FormControl value={form.hsCode} onChange={set("hsCode")} placeholder="e.g. 8708.30" autoComplete="off" /></div>
+                    <div className="s4">{lbl("QR code")}<FormControl value={form.qrCode} onChange={set("qrCode")} placeholder="Value printed in the QR code" autoComplete="off" /></div>
+                    <div className="s4">{lbl("Warranty period")}<div className="im-money"><input type="number" min="0" max="600" step="1" value={form.warrantyMonths} onChange={set("warrantyMonths")} placeholder="0" /><span style={{ borderRight: 0, borderLeft: "1px solid #e2e8f0" }}>months</span></div></div>
+                  </div>
+                </ImSection>
 
-            
-              <Form.Group as={Col} xs={12} md={6}>
-                {L("Preferred supplier")}
-                <InputGroup><Ic icon="mdi:truck-outline" /><FormSelect value={form.supplierId} onChange={set("supplierId")}>
-                  <option value="">No default supplier</option>
-                  {(lookups.suppliers || []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-                </FormSelect></InputGroup>
-                <small className="text-muted">Used as the default when you order this item. Add suppliers in Purchasing.</small>
-              </Form.Group>
-            </Row></Accordion.Body></Accordion.Item>
-            <Accordion.Item eventKey="stock">
-              <Accordion.Header><Icon icon="mdi:warehouse" width="20" height="20" className="me-2 text-primary" /><span><span className="fw-semibold">Stock settings</span> <Badge bg="light" text="muted" className="border ms-2 fw-normal">Optional</Badge><div className="small text-muted fw-normal">Reorder level, bin, batch tracking</div></span></Accordion.Header>
-              <Accordion.Body><Row className="g-3">
-              <Form.Group as={Col} xs={6} md={4}>{L("Reorder level")}<InputGroup><Ic icon="mdi:alert-outline" color="#fd7e14" /><FormControl type="number" min="0" value={form.reorderLevel} onChange={set("reorderLevel")} /></InputGroup></Form.Group>
-              <Form.Group as={Col} xs={6} md={4}>{L("Reorder qty")}<InputGroup><Ic icon="mdi:cart-arrow-down" /><FormControl type="number" min="0" value={form.reorderQty} onChange={set("reorderQty")} /></InputGroup></Form.Group>
-              <Form.Group as={Col} md={4}>{L("Bin / rack location")}<CreatableSelect value={form.binLocation} onChange={(v) => setForm((f) => ({ ...f, binLocation: v }))} options={lookups.bins || []} placeholder="Select bin / rack" addLabel="New bin / rack (e.g. Rack A-3)" icon="mdi:shelf" onAdd={(v) => addOption("BIN", v)} onManage={() => setManage("BIN")} /></Form.Group>
-              <Col xs={12} md={6}><div className="rounded border p-2 px-3"><Form.Check type="switch" id="inv-batch" label={<><Icon icon="mdi:calendar-clock-outline" width="18" height="18" /> Track batch &amp; expiry <small className="text-muted">(oil, coolant, brake fluid ...)</small></>} checked={form.trackBatch} onChange={set("trackBatch")} /></div></Col>
-              {item && <Col xs={12} md={6}><div className="rounded border p-2 px-3"><Form.Check type="switch" id="inv-active" label={<><Icon icon="mdi:eye-outline" width="18" height="18" /> Active <small className="text-muted">(visible in Spare Part Review)</small></>} checked={form.isActive} onChange={set("isActive")} /></div></Col>}
-            </Row></Accordion.Body></Accordion.Item>
-            <Accordion.Item eventKey="desc">
-              <Accordion.Header><Icon icon="mdi:image-text" width="20" height="20" className="me-2 text-primary" /><span><span className="fw-semibold">Description & photo</span> <Badge bg="light" text="muted" className="border ms-2 fw-normal">Optional</Badge><div className="small text-muted fw-normal">Notes and an item photo</div></span></Accordion.Header>
-              <Accordion.Body><Row className="g-3">
-              <Form.Group as={Col} md={8}>
-                {L("Description")}
-                <FormControl as="textarea" rows={5} maxLength={2000} value={form.description} onChange={set("description")} placeholder="Specification, fitting notes, warranty, anything the counter staff should know..." />
-                <div className="text-end small text-muted">{form.description.length}/2000</div>
-              </Form.Group>
-              <Form.Group as={Col} md={4}>
-                {L("Item photo")}
-                <div className="border rounded d-flex flex-column align-items-center justify-content-center text-center p-2" style={{ minHeight: 140 }}>
-                  {form.imageUrl ? (
-                    <>
-                      <a href={form.imageUrl} target="_blank" rel="noreferrer"><img src={form.imageUrl} alt="Item" style={{ maxWidth: "100%", maxHeight: 120, objectFit: "contain" }} /></a>
-                      <Button size="sm" variant="outline-danger" className="mt-2" onClick={() => setForm({ ...form, imageUrl: "" })}><Icon icon="mdi:delete-outline" width="16" height="16" /> Remove</Button>
-                    </>
-                  ) : (
-                    <label className="w-100 py-3 text-muted" style={{ cursor: "pointer" }}>
-                      {uploading ? <Spinner size="sm" /> : <Icon icon="mdi:image-plus-outline" width="34" height="34" />}
-                      <div className="small mt-1">{uploading ? "Uploading..." : "Click to upload a photo"}</div>
-                      <input type="file" accept="image/*" hidden disabled={uploading} onChange={pickImage} />
-                    </label>
-                  )}
+                <ImSection icon="mdi:cash-multiple" title="Pricing" hint="Cost, profit and the selling price">
+                  <div className="im-f">
+                    <div className="s4">{lbl("Cost price")}<div className="im-money"><span>Rs.</span><input type="number" min="0" value={form.costPrice} onChange={(e) => { setMv(null); set("costPrice")(e); }} /></div></div>
+                    <div className="s4">{lbl("Selling price")}<div className="im-money"><span>Rs.</span><input type="number" min="0" value={form.price} onChange={(e) => { setMv(null); set("price")(e); }} /></div></div>
+                    <div className="s4">
+                      {lbl("Profit (sets the selling price)")}
+                      <div className="im-money">
+                        <input type="number" min="0" step="any" value={mv ?? derived} onChange={(e) => setProfit(e.target.value)} disabled={cost <= 0} placeholder={cost <= 0 ? "Enter cost first" : "0"} />
+                        <div className="im-seg"><button type="button" className={mMode === "pct" ? "on" : ""} onClick={() => { setMMode("pct"); setMv(null); }}>%</button><button type="button" className={mMode === "amt" ? "on" : ""} onClick={() => { setMMode("amt"); setMv(null); }}>Rs.</button></div>
+                      </div>
+                    </div>
+                    {SHOW_PROFIT_STRIP && profitAmt !== null && (
+                      <div className="s12"><div className={`im-profit ${profitAmt >= 0 ? "pos" : "neg"}`}>
+                        <span><small>Profit</small><b>Rs. {profitAmt.toFixed(2)}</b></span>
+                        <span><small>On cost</small><b>{profitPct.toFixed(1)}%</b></span>
+                        <span><small>Margin</small><b>{((profitAmt / sell) * 100).toFixed(1)}%</b></span>
+                      </div></div>
+                    )}
+                    <div className="s6">
+                      {lbl("Preferred supplier")}
+                      <FormSelect value={form.supplierId} onChange={set("supplierId")}>
+                        <option value="">No default supplier</option>
+                        {(lookups.suppliers || []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                      </FormSelect>
+                      <div className="im-hint">Used as the default when you order this item. Add suppliers in Purchasing.</div>
+                    </div>
+                  </div>
+                </ImSection>
+
+                <ImSection icon="mdi:warehouse" title="Stock settings" hint="Optional: reorder points and where the item is stored">
+                  <div className="im-f">
+                    <div className="s4">{lbl("Daily demand")}<div className="im-money"><input type="number" min="0" step="any" value={form.dailyDemand} onChange={set("dailyDemand")} placeholder="0" /><span style={{ borderRight: 0, borderLeft: "1px solid #e2e8f0" }}>/ day</span></div></div>
+                    <div className="s4">{lbl("Supplier lead time")}<div className="im-money"><input type="number" min="0" step="1" value={form.leadTimeDays} onChange={set("leadTimeDays")} placeholder="0" /><span style={{ borderRight: 0, borderLeft: "1px solid #e2e8f0" }}>days</span></div></div>
+                    <div className="s4">{lbl("Safety stock")}<div className="im-money"><input type="number" min="0" step="any" value={form.safetyStock} onChange={set("safetyStock")} placeholder="0" /><span style={{ borderRight: 0, borderLeft: "1px solid #e2e8f0" }}>units</span></div></div>
+                    <div className="s6">
+                      {lbl("Reorder level (ROP)")}
+                      <div className="im-money"><input type="number" min="0" value={ropOn ? rop : form.reorderLevel} readOnly={ropOn} onChange={set("reorderLevel")} /><span style={{ borderRight: 0, borderLeft: "1px solid #e2e8f0" }}>units</span></div>
+                      <div className="im-hint">{ropOn ? `ROP = (${Number(form.dailyDemand)} \u00D7 ${Number(form.leadTimeDays)}) + ${Number(form.safetyStock) || 0} = ${rop} units. A Reorder alert shows when the available stock reaches ${rop}.` : "Enter the daily demand and the supplier lead time to calculate it, or type a level yourself."}</div>
+                    </div>
+                    <div className="s6">{lbl("Reorder qty")}<FormControl type="number" min="0" value={form.reorderQty} onChange={set("reorderQty")} /><div className="im-hint">How many to order when the alert shows.</div></div>
+                    <div className="s4">{lbl("Rack number")}<CreatableSelect value={form.rackNo} onChange={setRack("rackNo")} options={[]} extra={lookups.racks || []} placeholder="Select rack" addLabel="New rack number (e.g. A3)" icon="mdi:shelf" /></div>
+                    <div className="s4">{lbl("Row in the rack")}<CreatableSelect value={form.rackRow} onChange={setRack("rackRow")} options={[]} extra={lookups.rackRows || []} placeholder="Select row" addLabel="New row (e.g. 2)" icon="mdi:table-row" /></div>
+                    <div className="s4">{lbl("Location code")}<CreatableSelect value={form.binLocation} onChange={(v) => { setCodeTouched(true); setForm((f) => ({ ...f, binLocation: v })); }} options={lookups.bins || []} extra={lookups.locationCodes || []} placeholder="Select location code" addLabel="New location code (e.g. A3-2)" icon="mdi:map-marker-outline" /><div className="im-hint">Auto-filled as rack-row. Pick another or add a new code if you need to.</div></div>
+                    {item && <div className="s12"><label className="im-switch"><input type="checkbox" checked={form.isActive} onChange={set("isActive")} /><i /><span><b>Active</b><small>Visible in Spare Part Review</small></span></label></div>}
+                  </div>
+                </ImSection>
+
+                <ImSection icon="mdi:text-box-outline" title="Description" hint="Optional notes for the counter staff">
+                  <FormControl as="textarea" rows={4} maxLength={2000} value={form.description} onChange={set("description")} placeholder="Specification, fitting notes, warranty, anything the counter staff should know..." />
+                  <div className="im-hint text-end">{form.description.length}/2000</div>
+                </ImSection>
+              </div>
+
+              <aside className="im-side">
+                <div className="im-card">
+                  <div className="im-card-h"><Icon icon="mdi:image-outline" width="18" height="18" /> Item photo</div>
+                  <div className="im-photo">
+                    {form.imageUrl ? (
+                      <>
+                        <a href={form.imageUrl} target="_blank" rel="noreferrer"><img src={form.imageUrl} alt="Item" /></a>
+                        <button type="button" className="im-link" onClick={() => setForm({ ...form, imageUrl: "" })}><Icon icon="mdi:delete-outline" width="16" height="16" /> Remove photo</button>
+                      </>
+                    ) : (
+                      <label className="im-drop">
+                        {uploading ? <Spinner size="sm" /> : <Icon icon="mdi:image-plus-outline" width="34" height="34" />}
+                        <b>{uploading ? "Uploading..." : "Click to upload a photo"}</b><small>JPG, PNG or WEBP, up to 8 MB</small>
+                        <input type="file" accept="image/*" hidden disabled={uploading} onChange={pickImage} />
+                      </label>
+                    )}
+                  </div>
                 </div>
-              </Form.Group>
-            </Row></Accordion.Body></Accordion.Item>
-            </Accordion>
-              {!item && <div><small className="text-muted"><Icon icon="mdi:information-outline" width="14" height="14" /> New items start with 0 stock. Use Receive (or a Purchase Order) to add stock. Compatible vehicles and alternate part numbers can be added in their tabs; they are saved together with the item.</small></div>}
+                <div className="im-card im-preview">
+                  <div className="im-card-h"><Icon icon="mdi:eye-outline" width="18" height="18" /> Summary</div>
+                  <div className="im-pname">{form.name.trim() || <span className="im-ph">Item name</span>}</div>
+                  <div className="im-pmeta">{[catLabel(cats, Number(subId || mainId)), form.brand, form.quality].filter(Boolean).join(" · ") || <span className="im-ph">Category · brand · quality</span>}</div>
+                  <div className="im-prow"><span>Selling price</span><b>Rs. {sell > 0 ? sell.toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-"}</b></div>
+                  <div className="im-prow"><span>Cost price</span><b>Rs. {cost > 0 ? cost.toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-"}</b></div>
+                  {Number(form.warrantyMonths) > 0 && <div className="im-prow"><span>Warranty</span><b>{form.warrantyMonths} months</b></div>}
+                  <div className="im-prow"><span>Reorder level</span><b>{ropOn ? rop : form.reorderLevel || 0} {form.unit}</b></div>
+                  {!item && <div className="im-hint mt-2">New items start with 0 stock. Use Receive (or a Purchase Order) to add stock.</div>}
+                </div>
+              </aside>
+            </div>
           </Tab>
-          <Tab eventKey="vehicles" title={<><Icon icon="mdi:car-outline" width="16" height="16" /> Compatible vehicles{!item && fits.length > 0 ? ` (${fits.length})` : ""}</>}><VehiclesPane itemId={item?.id} draft={fits} setDraft={setFits} /></Tab>
-          <Tab eventKey="alternates" title={<><Icon icon="mdi:swap-horizontal" width="16" height="16" /> Alternate part numbers{!item && alts.length > 0 ? ` (${alts.length})` : ""}</>}><AlternatesPane itemId={item?.id} draft={alts} setDraft={setAlts} /></Tab>
-          {item && <Tab eventKey="batches" title={<><Icon icon="mdi:barcode" width="16" height="16" /> Batches</>}><BatchesPane itemId={item.id} /></Tab>}
+          {item && <Tab eventKey="batches" title={<><Icon icon="mdi:barcode" width="16" height="16" /> Batches</>}><div className="im-card"><BatchesPane itemId={item.id} /></div></Tab>}
         </Tabs>
       </Modal.Body>
       {manage === "UNIT" && <UnitsModal onClose={() => setManage(null)} />}
       {manage === "QUALITY" && <QualitiesModal onClose={() => setManage(null)} />}
       {manage === "BIN" && <BinsModal onClose={() => setManage(null)} />}
-      <Modal.Footer>
-        <Button variant="secondary" onClick={onClose}><Icon icon="mdi:close" width="18" height="18" /> Close</Button>
-        <Button disabled={adding || saving || uploading} onClick={save}><Icon icon="mdi:content-save-outline" width="18" height="18" /> {adding || saving ? "Saving..." : item ? "Save changes" : "Save item"}</Button>
-      </Modal.Footer>
+      <div className="im-foot">
+        <span className="im-req"><i>*</i> Required</span>
+        <div className="im-foot-r">
+          <button type="button" className="im-btn ghost" onClick={onClose}>Cancel</button>
+          <button type="button" className="im-btn" disabled={adding || saving || uploading || !canSave} onClick={save}><Icon icon="mdi:content-save-outline" width="18" height="18" /> {adding || saving ? "Saving..." : item ? "Save changes" : "Save item"}</button>
+        </div>
+      </div>
     </Modal>
   );
 }
@@ -367,9 +434,12 @@ const MOVES = {
   ISSUE: { title: "Issue stock", sub: "Stock goes out to a job or department", icon: "mdi:package-up", tone: "warning", ref: "Department / job no", sign: -1, btn: "Issue stock" },
   RETURN: { title: "Return to stock", sub: "Unused stock comes back", icon: "mdi:undo-variant", tone: "info", ref: "Reference (job no ...)", sign: 1, btn: "Return to stock" },
 };
+const layerOf = (x) => (x.layers && x.layers[0]) || {};
+
 function MovementModal({ item, type, lookups, onClose }) {
   const cfg = MOVES[type];
   const [post, { isLoading }] = usePostInventoryMovementMutation();
+  const [sp, setSp] = useState("");   // selling price for THIS received stock (per layer)
   const [f, setF] = useState({ locationId: lookups.locations[0]?.id || "", qty: "", unitCost: item.avgCost || item.costPrice || "", refNo: "", note: "", technician: "", batchNo: "", expiryDate: "" });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const qty = Number(f.qty) || 0;
@@ -377,8 +447,23 @@ function MovementModal({ item, type, lookups, onClose }) {
   const after = item.onHand + change;
   const value = qty * (Number(f.unitCost) || 0);
   const ready = qty > 0 && after >= 0 && (!cfg.cost || Number(f.unitCost) > 0);
+  // Receive only: every receipt is its own cost layer with its own selling price (FIFO) - old stock keeps its old price.
+  const newCost = Number(f.unitCost) || 0;
+  const layers = (item.layers || []).filter((l) => l.qty > 0);
+  const lastLayer = layers[layers.length - 1];
+  const refCost = lastLayer?.cost > 0 ? lastLayer.cost : item.costPrice > 0 ? item.costPrice : item.avgCost || 0;
+  const refPrice = lastLayer?.price > 0 ? lastLayer.price : item.price || 0;
+  const curMarkup = refCost > 0 && refPrice > 0 ? (refPrice - refCost) / refCost : null;
+  const suggested = newCost > 0 && curMarkup !== null ? Math.round(newCost * (1 + curMarkup) * 100) / 100 : refPrice;   // same markup on the new cost
+  const newPrice = sp === "" ? suggested : Number(sp);
+  const marginNew = newPrice > 0 && newCost > 0 ? ((newPrice - newCost) / newPrice) * 100 : null;
+  const costDiff = newCost - refCost;
+  const showLayers = type === "GRN";
   const save = async () => {
-    try { await post({ partId: item.id, type, ...f }).unwrap(); onClose(); } catch (ex) { fail(ex, "Could not update the stock."); }
+    try {
+      await post({ partId: item.id, type, ...f, ...(type === "GRN" && newPrice > 0 ? { sellPrice: newPrice } : {}) }).unwrap();
+      onClose();
+    } catch (ex) { fail(ex, "Could not update the stock."); }
   };
   const th = "bg-light text-muted fw-semibold small";
   const SectionHead = ({ icon, title }) => (
@@ -437,6 +522,43 @@ function MovementModal({ item, type, lookups, onClose }) {
             </tbody>
           </Table>
         </div>
+
+        {/* stock layers + selling price of the new stock */}
+        {showLayers && (
+          <div className="border rounded bg-white mb-3 overflow-hidden">
+            <SectionHead icon="mdi:layers-outline" title="Stock cost & selling price (FIFO)" />
+            <div className="p-3">
+              <div className="table-responsive">
+                <Table size="sm" className="mb-2 align-middle">
+                  <thead><tr><th className={th}>Stock</th><th className={`${th} text-end`}>Qty</th><th className={`${th} text-end`}>Cost</th><th className={`${th} text-end`}>Selling price</th><th className={`${th} text-end`}>Margin</th></tr></thead>
+                  <tbody>
+                    {layers.length === 0 && <tr><td colSpan={5} className="text-muted small">No earlier stock layers. Current price Rs. {money(item.price)}.</td></tr>}
+                    {layers.map((l, i) => (
+                      <tr key={i}>
+                        <td>{i === 0 ? "Sold first (old stock)" : `Older batch ${i + 1}`}</td>
+                        <td className="text-end">{qtyFmt(l.qty)}</td><td className="text-end">{money(l.cost)}</td><td className="text-end"><b>{money(l.price)}</b></td>
+                        <td className="text-end">{l.price > 0 && l.cost > 0 ? `${(((l.price - l.cost) / l.price) * 100).toFixed(1)}%` : "-"}</td>
+                      </tr>
+                    ))}
+                    <tr className="table-active">
+                      <td><b>This stock (new)</b></td><td className="text-end">{qty > 0 ? qtyFmt(qty) : "-"}</td><td className="text-end">{newCost > 0 ? money(newCost) : "-"}</td>
+                      <td className="text-end"><b>{newPrice > 0 ? money(newPrice) : "-"}</b></td><td className="text-end">{marginNew !== null ? `${marginNew.toFixed(1)}%` : "-"}</td>
+                    </tr>
+                  </tbody>
+                </Table>
+              </div>
+              {layers.length > 0 && newCost > 0 && Math.abs(costDiff) >= 0.005 && (
+                <div className="small mb-2">New cost Rs. <b>{money(newCost)}</b> is {costDiff > 0 ? "higher" : "lower"} than the last cost Rs. <b>{money(refCost)}</b>
+                  <span className={costDiff > 0 ? "text-danger" : "text-success"}> ({costDiff > 0 ? "+" : ""}{((costDiff / refCost) * 100).toFixed(1)}%)</span>.</div>
+              )}
+              <div className="d-flex flex-wrap align-items-center gap-3">
+                <InputGroup style={{ maxWidth: 300 }}><InputGroup.Text className="bg-light small">Selling price for this stock Rs.</InputGroup.Text>
+                  <FormControl type="number" min="0" step="any" value={sp === "" ? suggested || "" : sp} onChange={(e) => setSp(e.target.value)} /></InputGroup>
+                <small className="text-muted">Suggested {money(suggested)} (same markup on the new cost). Old stock keeps its old price; the new price starts once the old stock is sold out.</small>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 3. effect */}
         <div className={`rounded border p-3 d-flex align-items-center justify-content-around text-center ${after < 0 ? "border-danger bg-danger-subtle" : "bg-white"}`}>
@@ -551,7 +673,240 @@ function HistoryModal({ item, onClose }) {
   );
 }
 
+/* ---------- Manage lists: categories (main > sub), units, quality, brands, location codes and the other typed values ---------- */
+const ML_CSS = `
+.ml-dialog .modal-content { border: 0; border-radius: 18px; overflow: hidden; background: #f1f5f9; font-family: Inter, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color: #0f172a; height: min(86vh, 820px); }
+.ml-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 22px; background: #fff; border-bottom: 1px solid #e2e8f0; }
+.ml-head b { font-size: 1.1rem; } .ml-head small { display: block; color: #64748b; }
+.ml-x { width: 38px; height: 38px; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; display: grid; place-items: center; cursor: pointer; } .ml-x:hover { background: #f1f5f9; }
+.ml-body { display: grid; grid-template-columns: 230px minmax(0, 1fr); min-height: 0; flex: 1 1 auto; }
+.ml-nav { background: #fff; border-right: 1px solid #e2e8f0; padding: 12px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+.ml-nav button { display: flex; align-items: center; gap: 10px; border: 0; background: transparent; text-align: left; padding: 10px 12px; border-radius: 10px; font-weight: 600; color: #334155; cursor: pointer; } .ml-nav button:hover { background: #f1f5f9; } .ml-nav button.on { background: #0f172a; color: #fff; }
+.ml-pane { padding: 18px 22px; overflow-y: auto; min-width: 0; }
+.ml-bar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; } .ml-bar .form-control, .ml-bar .form-select { height: 42px; border-radius: 10px; max-width: 360px; }
+.ml-btn { height: 42px; padding: 0 16px; border: 0; border-radius: 10px; background: #0f172a; color: #fff; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; } .ml-btn:disabled { opacity: .5; cursor: not-allowed; }
+.ml-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden; }
+.ml-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-top: 1px solid #eef2f6; } .ml-row:first-child { border-top: 0; } .ml-row.sub { padding-left: 44px; background: #fcfdff; } .ml-row.off .nm { color: #94a3b8; }
+.ml-row .nm { flex: 1 1 auto; min-width: 0; font-weight: 600; overflow-wrap: anywhere; } .ml-row .nm small { display: block; font-weight: 500; color: #64748b; }
+.ml-ib { width: 34px; height: 34px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; color: #334155; display: grid; place-items: center; cursor: pointer; flex: none; } .ml-ib:hover:not(:disabled) { background: #0f172a; border-color: #0f172a; color: #fff; } .ml-ib:disabled { opacity: .45; }
+.ml-cnt { background: #e2e8f0; color: #334155; border-radius: 999px; padding: 1px 10px; font-size: .75rem; font-weight: 700; flex: none; }
+.ml-sw { display: inline-flex; align-items: center; cursor: pointer; margin: 0; flex: none; } .ml-sw input { position: absolute; opacity: 0; } .ml-sw i { width: 38px; height: 22px; border-radius: 999px; background: #cbd5e1; position: relative; transition: background .15s; } .ml-sw i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .15s; box-shadow: 0 1px 3px rgba(0,0,0,.25); } .ml-sw input:checked + i { background: #0f172a; } .ml-sw input:checked + i::after { transform: translateX(16px); }
+.ml-inline { display: flex; gap: 6px; flex: 1 1 auto; } .ml-inline .form-control, .ml-inline .form-select { height: 36px; border-radius: 9px; }
+.ml-empty { padding: 34px; text-align: center; color: #64748b; } .ml-note { color: #64748b; font-size: .84rem; margin-top: 10px; }
+@media (max-width: 767px) { .ml-body { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); } .ml-nav { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid #e2e8f0; } .ml-nav button { white-space: nowrap; } .ml-row.sub { padding-left: 24px; } }
+`;
+const ML_TABS = [
+  ["categories", "Categories", "mdi:shape-outline"], ["UNIT", "Units", "mdi:ruler"], ["QUALITY", "Quality", "mdi:medal-outline"], ["BRAND", "Brands", "mdi:star-circle-outline"],
+  ["BIN", "Location codes", "mdi:shelf"], ["values", "Other lists", "mdi:format-list-bulleted"],
+];
+const Switch = ({ checked, onChange, disabled, title }) => <label className="ml-sw" title={title}><input type="checkbox" checked={checked} disabled={disabled} onChange={onChange} /><i /></label>;
+
+function MlCategories() {
+  const { data = [], isLoading } = useInvGetQuery("lists/categories");
+  const [send, busy] = useSend();
+  const [add, setAdd] = useState(null);          // { parentId: null | id, text }
+  const [edit, setEdit] = useState(null);        // { id, text }
+  const mains = data.filter((c) => !c.parentId);
+  const subsOf = (id) => data.filter((c) => c.parentId === id);
+  const total = (c) => c.itemCount + subsOf(c.id).reduce((s, x) => s + x.itemCount, 0);
+  const put = (id, body) => send(`lists/categories/${id}`, body, "PUT");
+  const create = async () => { if (!add?.text.trim()) return; if (await send("categories", { name: add.text.trim(), ...(add.parentId ? { parentId: add.parentId } : {}) })) setAdd(null); };
+  const rename = async () => { if (!edit?.text.trim()) return; if (await put(edit.id, { name: edit.text.trim() })) setEdit(null); };
+  const Name = ({ c, sub }) => (edit?.id === c.id ? (
+    <div className="ml-inline"><FormControl autoFocus value={edit.text} onChange={(e) => setEdit({ ...edit, text: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") rename(); if (e.key === "Escape") setEdit(null); }} />
+      <button type="button" className="ml-ib" onClick={rename} disabled={busy} title="Save"><Icon icon="mdi:check" width="18" height="18" /></button>
+      <button type="button" className="ml-ib" onClick={() => setEdit(null)} title="Cancel"><Icon icon="mdi:close" width="18" height="18" /></button></div>
+  ) : <div className="nm">{sub && <Icon icon="mdi:subdirectory-arrow-right" width="16" height="16" className="me-1 text-muted" />}{c.name}{!c.isActive && <small>Hidden</small>}</div>);
+  const AddBox = ({ parentId, label }) => (add && add.parentId === parentId ? (
+    <div className={`ml-row ${parentId ? "sub" : ""}`}><div className="ml-inline"><FormControl autoFocus value={add.text} placeholder={label} onChange={(e) => setAdd({ ...add, text: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") create(); if (e.key === "Escape") setAdd(null); }} />
+      <button type="button" className="ml-btn" style={{ height: 36 }} onClick={create} disabled={busy || !add.text.trim()}>Add</button>
+      <button type="button" className="ml-ib" onClick={() => setAdd(null)} title="Cancel"><Icon icon="mdi:close" width="18" height="18" /></button></div></div>
+  ) : null);
+  if (isLoading) return <Loader />;
+  return (
+    <>
+      <div className="ml-bar"><button type="button" className="ml-btn" onClick={() => setAdd({ parentId: null, text: "" })}><Icon icon="mdi:plus" width="18" height="18" /> Main category</button></div>
+      <div className="ml-card">
+        <AddBox parentId={null} label="New main category" />
+        {mains.length === 0 && !add && <div className="ml-empty">No categories yet</div>}
+        {mains.map((c) => (
+          <div key={c.id}>
+            <div className={`ml-row ${c.isActive ? "" : "off"}`}>
+              <Name c={c} />
+              <span className="ml-cnt" title="Items in this category and its sub categories">{total(c)} item{total(c) === 1 ? "" : "s"}</span>
+              <button type="button" className="ml-ib" onClick={() => setAdd({ parentId: c.id, text: "" })} title="Add a sub category"><Icon icon="mdi:plus" width="18" height="18" /></button>
+              <button type="button" className="ml-ib" onClick={() => setEdit({ id: c.id, text: c.name })} title="Rename"><Icon icon="mdi:pencil-outline" width="16" height="16" /></button>
+              <Switch checked={c.isActive} disabled={busy} onChange={() => put(c.id, { isActive: !c.isActive })} title={c.isActive ? "Active: click to hide" : "Hidden: click to show"} />
+            </div>
+            <AddBox parentId={c.id} label={`New sub category under ${c.name}`} />
+            {subsOf(c.id).map((x) => (
+              <div key={x.id} className={`ml-row sub ${x.isActive ? "" : "off"}`}>
+                <Name c={x} sub />
+                <span className="ml-cnt">{x.itemCount} item{x.itemCount === 1 ? "" : "s"}</span>
+                <FormSelect size="sm" style={{ width: 170 }} value={x.parentId} disabled={busy} title="Move to another main category" onChange={(e) => put(x.id, { parentId: Number(e.target.value) })}>
+                  {mains.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </FormSelect>
+                <button type="button" className="ml-ib" onClick={() => setEdit({ id: x.id, text: x.name })} title="Rename"><Icon icon="mdi:pencil-outline" width="16" height="16" /></button>
+                <Switch checked={x.isActive} disabled={busy} onChange={() => put(x.id, { isActive: !x.isActive })} title={x.isActive ? "Active: click to hide" : "Hidden: click to show"} />
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+      <div className="ml-note">Items keep their category when you rename or move it. Hidden categories are not offered for new items. Add sub categories with the + button of a main category.</div>
+    </>
+  );
+}
+
+function MlOptions({ kind, label }) {
+  const { data = [], isLoading } = useInvGetQuery(`lists/options?kind=${kind}`);
+  const [send, busy] = useSend();
+  const [text, setText] = useState("");
+  const [edit, setEdit] = useState(null);
+  const add = async () => { if (!text.trim()) return; if (await send("lists/options", { kind, name: text.trim() })) setText(""); };
+  const rename = async () => { if (!edit?.text.trim()) return; if (await send(`lists/options/${edit.id}`, { name: edit.text.trim() }, "PUT")) setEdit(null); };
+  if (isLoading) return <Loader />;
+  return (
+    <>
+      <div className="ml-bar">
+        <FormControl value={text} onChange={(e) => setText(e.target.value)} placeholder={`New ${label.toLowerCase()}`} autoComplete="off" onKeyDown={(e) => e.key === "Enter" && add()} />
+        <button type="button" className="ml-btn" onClick={add} disabled={busy || !text.trim()}><Icon icon="mdi:plus" width="18" height="18" /> Add</button>
+      </div>
+      <div className="ml-card">
+        {data.length === 0 && <div className="ml-empty">Nothing here yet</div>}
+        {data.map((o) => (
+          <div key={o.id} className={`ml-row ${o.isActive ? "" : "off"}`}>
+            {edit?.id === o.id ? (
+              <div className="ml-inline"><FormControl autoFocus value={edit.text} onChange={(e) => setEdit({ ...edit, text: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") rename(); if (e.key === "Escape") setEdit(null); }} />
+                <button type="button" className="ml-ib" onClick={rename} disabled={busy} title="Save"><Icon icon="mdi:check" width="18" height="18" /></button>
+                <button type="button" className="ml-ib" onClick={() => setEdit(null)} title="Cancel"><Icon icon="mdi:close" width="18" height="18" /></button></div>
+            ) : <div className="nm">{o.name}{!o.isActive && <small>Hidden</small>}</div>}
+            <span className="ml-cnt">{o.itemCount} item{o.itemCount === 1 ? "" : "s"}</span>
+            <button type="button" className="ml-ib" onClick={() => setEdit({ id: o.id, text: o.name })} title="Rename"><Icon icon="mdi:pencil-outline" width="16" height="16" /></button>
+            <Switch checked={o.isActive} disabled={busy} onChange={() => send(`lists/options/${o.id}`, { isActive: !o.isActive }, "PUT")} title={o.isActive ? "Active: click to hide" : "Hidden: click to show"} />
+          </div>
+        ))}
+      </div>
+      <div className="ml-note">Renaming also renames it on every item that uses it. Hidden entries are not offered for new items.</div>
+    </>
+  );
+}
+
+const VALUE_FIELDS = [["classification", "Material classification"], ["manufacturer", "Manufacturer"], ["country", "Country of origin"], ["rackNo", "Rack number"], ["rackRow", "Row in the rack"]];
+function MlValues() {
+  const [field, setField] = useState("classification");
+  const { data = [], isLoading } = useInvGetQuery(`lists/values?field=${field}`);
+  const [send, busy] = useSend();
+  const [edit, setEdit] = useState(null);
+  const rename = async () => { if (!edit?.text.trim() || edit.text.trim() === edit.from) return setEdit(null); if (await send("lists/values", { field, from: edit.from, to: edit.text.trim() }, "PUT")) setEdit(null); };
+  const clear = async (v) => {
+    const c = await Swal.fire({ title: "Clear this value?", text: `"${v.name}" will be removed from ${v.itemCount} item${v.itemCount === 1 ? "" : "s"}. The items are kept.`, icon: "warning", showCancelButton: true, confirmButtonText: "Clear", confirmButtonColor: "#111" });
+    if (c.isConfirmed) send("lists/values", { field, from: v.name, to: "" }, "PUT");
+  };
+  return (
+    <>
+      <div className="ml-bar"><FormSelect value={field} onChange={(e) => { setField(e.target.value); setEdit(null); }}>{VALUE_FIELDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</FormSelect></div>
+      {isLoading ? <Loader /> : (
+        <div className="ml-card">
+          {data.length === 0 && <div className="ml-empty">No values yet. They appear here when items use them.</div>}
+          {data.map((v) => (
+            <div key={v.name} className="ml-row">
+              {edit?.from === v.name ? (
+                <div className="ml-inline"><FormControl autoFocus value={edit.text} onChange={(e) => setEdit({ ...edit, text: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") rename(); if (e.key === "Escape") setEdit(null); }} />
+                  <button type="button" className="ml-ib" onClick={rename} disabled={busy} title="Save"><Icon icon="mdi:check" width="18" height="18" /></button>
+                  <button type="button" className="ml-ib" onClick={() => setEdit(null)} title="Cancel"><Icon icon="mdi:close" width="18" height="18" /></button></div>
+              ) : <div className="nm">{v.name}</div>}
+              <span className="ml-cnt">{v.itemCount} item{v.itemCount === 1 ? "" : "s"}</span>
+              <button type="button" className="ml-ib" onClick={() => setEdit({ from: v.name, text: v.name })} title="Rename"><Icon icon="mdi:pencil-outline" width="16" height="16" /></button>
+              <button type="button" className="ml-ib" onClick={() => clear(v)} disabled={busy} title="Clear from items"><Icon icon="mdi:delete-outline" width="17" height="17" /></button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="ml-note">These values are typed on the items. Renaming changes them on every item. Renaming to a name that already exists merges them. New values are added from the Add item window.</div>
+    </>
+  );
+}
+
+function ManageListsModal({ onClose }) {
+  const [tab, setTab] = useState("categories");
+  return (
+    <Modal show onHide={onClose} size="xl" centered enforceFocus={false} dialogClassName="ml-dialog">
+      <style>{ML_CSS}</style>
+      <div className="ml-head">
+        <div><b>Manage lists</b><small>Categories, units, quality, brands, location codes and more</small></div>
+        <button type="button" className="ml-x" onClick={onClose} aria-label="Close"><Icon icon="mdi:close" width="20" height="20" /></button>
+      </div>
+      <div className="ml-body">
+        <nav className="ml-nav">{ML_TABS.map(([k, l, ic]) => <button key={k} type="button" className={tab === k ? "on" : ""} onClick={() => setTab(k)}><Icon icon={ic} width="19" height="19" />{l}</button>)}</nav>
+        <div className="ml-pane">
+          {tab === "categories" && <MlCategories />}
+          {tab === "UNIT" && <MlOptions key="UNIT" kind="UNIT" label="Unit" />}
+          {tab === "QUALITY" && <MlOptions key="QUALITY" kind="QUALITY" label="Quality" />}
+          {tab === "BRAND" && <MlOptions key="BRAND" kind="BRAND" label="Brand" />}
+          {tab === "BIN" && <MlOptions key="BIN" kind="BIN" label="Location code" />}
+          {tab === "values" && <MlValues />}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 /* ---------- Items & Stock tab ---------- */
+const LIST_CSS = `
+.it-wrap { font-family: Inter, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color: #0f172a; }
+.it-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.it-title { display: flex; align-items: center; gap: 12px; } .it-title .ic { width: 44px; height: 44px; border-radius: 12px; background: #0f172a; color: #fff; display: grid; place-items: center; }
+.it-title h2 { font-size: 1.25rem; font-weight: 700; margin: 0; } .it-title small { color: #64748b; }
+.it-actions { display: flex; gap: 8px; align-items: center; }
+.it-btn { height: 42px; padding: 0 18px; border: 0; border-radius: 10px; background: #0f172a; color: #fff; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; } .it-btn:hover:not(:disabled) { background: #1e293b; } .it-btn:disabled { opacity: .5; }
+.it-btn.ghost { background: #fff; color: #0f172a; border: 1px solid #cbd5e1; } .it-btn.ghost:hover { background: #f1f5f9; }
+.it-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.it-kpi { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+.it-kpi .ic { width: 40px; height: 40px; border-radius: 10px; background: #f1f5f9; color: #334155; display: grid; place-items: center; flex: none; }
+.it-kpi small { display: block; color: #64748b; font-size: .74rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; } .it-kpi b { font-size: 1.3rem; font-variant-numeric: tabular-nums; }
+.it-kpi.warn .ic { background: #fef3c7; color: #92400e; } .it-kpi.bad .ic { background: #e5e7eb; color: #111827; }
+.it-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px rgba(15,23,42,.04); overflow: hidden; }
+.it-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 16px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
+.it-search { position: relative; flex: 1 1 280px; max-width: 420px; } .it-search svg { position: absolute; left: 12px; top: 12px; color: #94a3b8; }
+.it-in { height: 42px; width: 100%; padding: 0 36px 0 38px; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; outline: 0; font-size: .95rem; } .it-in:focus, .it-sel:focus { border-color: #0f172a; box-shadow: 0 0 0 3px rgba(15,23,42,.12); }
+.it-clear { position: absolute; right: 6px; top: 6px; width: 30px; height: 30px; border: 0; background: transparent; border-radius: 8px; color: #94a3b8; cursor: pointer; } .it-clear:hover { background: #f1f5f9; color: #0f172a; }
+.it-sel { height: 42px; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; padding: 0 12px; font-size: .92rem; min-width: 190px; max-width: 280px; outline: 0; }
+.it-seg { display: inline-flex; padding: 3px; background: #e2e8f0; border-radius: 10px; } .it-seg button { border: 0; background: transparent; height: 36px; padding: 0 14px; border-radius: 8px; font-weight: 600; color: #475569; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; } .it-seg button.on { background: #0f172a; color: #fff; }
+.it-chk { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; margin: 0; color: #334155; font-weight: 500; } .it-chk input { width: 18px; height: 18px; accent-color: #0f172a; }
+.it-spacer { flex: 1 1 auto; }
+.it-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+.it-table th { position: sticky; top: 0; background: #fff; font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #64748b; padding: 12px 16px; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+.it-table td { padding: 12px 16px; border-bottom: 1px solid #eef2f6; vertical-align: middle; } .it-table tbody tr:hover { background: #f8fafc; } .it-table tr.off { opacity: .55; }
+.it-table .r { text-align: right; }
+.it-prod { display: flex; align-items: center; gap: 12px; min-width: 260px; } .it-thumb { width: 48px; height: 48px; border-radius: 10px; border: 1px solid #e2e8f0; background: #f1f5f9; object-fit: cover; flex: none; display: grid; place-items: center; color: #94a3b8; }
+.it-zoom { position: relative; border: 0; padding: 0; background: transparent; border-radius: 10px; flex: none; cursor: zoom-in; overflow: hidden; } .it-zoom .it-thumb { display: block; }
+.it-zoom-ic { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(15,23,42,.5); color: #fff; opacity: 0; transition: opacity .12s; } .it-zoom:hover .it-zoom-ic, .it-zoom:focus-visible .it-zoom-ic { opacity: 1; } .it-zoom:focus-visible { outline: 2px solid #0f172a; outline-offset: 2px; }
+.modal-backdrop.it-lb-bd { background: #0f172a; } .modal-backdrop.it-lb-bd.show { opacity: .85; }
+.it-lb .modal-content { background: transparent; border: 0; } .it-lb-card { background: #fff; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.4); }
+.it-lb-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px 10px 18px; border-bottom: 1px solid #e2e8f0; } .it-lb-bar b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .it-lb-bar span { display: inline-flex; gap: 6px; flex: none; }
+.it-lb-btn { width: 36px; height: 36px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; color: #334155; display: grid; place-items: center; cursor: pointer; text-decoration: none; } .it-lb-btn:hover { background: #f1f5f9; color: #0f172a; }
+.it-lb-img { background: #f1f5f9; display: grid; place-items: center; padding: 14px; } .it-lb-img img { max-width: 100%; max-height: 75vh; object-fit: contain; border-radius: 8px; }
+.it-name { font-weight: 600; } .it-meta { color: #64748b; font-size: .82rem; overflow-wrap: anywhere; } .it-tag { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; background: #e2e8f0; color: #334155; font-size: .68rem; font-weight: 700; vertical-align: middle; }
+.it-pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: 999px; font-size: .74rem; font-weight: 700; } .it-pill.ok { background: #dcfce7; color: #166534; } .it-pill.low { background: #fef3c7; color: #92400e; } .it-pill.out { background: #e5e7eb; color: #111827; }
+.it-qty b { font-size: 1.05rem; font-variant-numeric: tabular-nums; } .it-qty small { color: #64748b; }
+.it-bar { height: 5px; border-radius: 999px; background: #e2e8f0; overflow: hidden; width: 90px; margin-top: 5px; } .it-bar i { display: block; height: 100%; background: #0f172a; border-radius: 999px; } .it-bar.low i { background: #d97706; } .it-bar.out i { background: #9ca3af; }
+.it-price b { font-variant-numeric: tabular-nums; } .it-price small { display: block; color: #94a3b8; font-variant-numeric: tabular-nums; }
+.it-acts { display: inline-flex; gap: 6px; align-items: center; }
+.it-ibtn { width: 36px; height: 36px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; color: #334155; display: grid; place-items: center; cursor: pointer; } .it-ibtn:hover { background: #0f172a; border-color: #0f172a; color: #fff; }
+.it-recv { height: 36px; padding: 0 14px; border: 0; border-radius: 9px; background: #0f172a; color: #fff; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; } .it-recv:hover { background: #1e293b; }
+.it-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; padding: 16px; }
+.it-tile { border: 1px solid #e2e8f0; border-radius: 14px; padding: 14px; background: #fff; display: flex; flex-direction: column; gap: 12px; } .it-tile:hover { box-shadow: 0 8px 24px rgba(15,23,42,.08); } .it-tile.off { opacity: .55; }
+.it-tile .row2 { display: flex; justify-content: space-between; align-items: flex-end; }
+.it-empty { text-align: center; padding: 60px 20px; color: #64748b; } .it-empty svg { color: #cbd5e1; margin-bottom: 8px; } .it-empty b { display: block; color: #0f172a; font-size: 1.05rem; }
+.it-skel { height: 64px; margin: 8px 16px; border-radius: 10px; background: linear-gradient(90deg, #f1f5f9, #e2e8f0, #f1f5f9); background-size: 200% 100%; animation: itsk 1.2s infinite; } @keyframes itsk { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.it-foot { padding: 10px 16px; color: #64748b; font-size: .85rem; border-top: 1px solid #e2e8f0; background: #f8fafc; display: flex; justify-content: space-between; }
+@media (max-width: 991px) { .it-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .it-hide-md { display: none; } }
+@media (max-width: 575px) { .it-sel { min-width: 0; flex: 1 1 140px; } .it-search { max-width: none; } .it-kpi b { font-size: 1.1rem; } }
+`;
+const stockState = (x) => (x.available <= 0 ? "out" : x.isLow ? "low" : "ok");
+const STATE_LABEL = { ok: "In stock", low: "Low", out: "Out of stock" };
+
 export default function ItemsTab() {
   const [q, setQ] = useState("");
   const [dq, setDq] = useState("");
@@ -560,150 +915,150 @@ export default function ItemsTab() {
   const [showHidden, setShowHidden] = useState(false);
   const [view, setView] = useState("table");
   const [modal, setModal] = useState(null);                 // { kind: 'item'|'move'|'history', item?, type? }
+  const [manageOpen, setManageOpen] = useState(false);
+  const [preview, setPreview] = useState(null);             // { url, name } photo shown big
   useEffect(() => { const t = setTimeout(() => setDq(q), 300); return () => clearTimeout(t); }, [q]);
 
   const { data: lookups } = useGetInventoryLookupsQuery();
   const { data, isFetching, isError, refetch } = useGetInventoryItemsQuery({ q: dq, categoryId, low: stockFilter === "low", all: showHidden });
-  const [catOpen, setCatOpen] = useState(false);
-  const [listOpen, setListOpen] = useState(null);   // "UNIT" | "QUALITY"
   const items = data?.items || [];
   const open = (kind, item, type) => setModal({ kind, item, type });
+  const cats = lookups?.categories || [];
+  const filtered = !!(dq || categoryId || stockFilter);
+  const lowCount = items.filter((x) => x.isActive && x.available > 0 && x.isLow).length;
+  const outCount = items.filter((x) => x.isActive && x.available <= 0).length;
+  const loading = !lookups || (isFetching && !data);
 
-  const stockBadge = (x) => (x.available <= 0 ? <StatusBadge status="Out of stock" /> : x.isLow ? <StatusBadge status="Low" /> : null);
-  const tone = (x) => (x.available <= 0 ? "danger" : x.isLow ? "warning" : "success");
+  const level = (x) => (x.reorderLevel > 0 ? Math.min(100, (x.available / (x.reorderLevel * 2)) * 100) : x.available > 0 ? 100 : 0);
+  const Acts = ({ x }) => (
+    <div className="it-acts">
+      <button type="button" className="it-recv" onClick={() => open("move", x, "GRN")} title="Receive stock"><Icon icon="mdi:package-down" width="17" height="17" /> Receive</button>
+      <button type="button" className="it-ibtn" onClick={() => open("move", x, "ISSUE")} title="Issue stock" aria-label="Issue stock"><Icon icon="mdi:package-up" width="18" height="18" /></button>
+      <button type="button" className="it-ibtn" onClick={() => open("move", x, "RETURN")} title="Return to stock" aria-label="Return to stock"><Icon icon="mdi:undo-variant" width="18" height="18" /></button>
+      <button type="button" className="it-ibtn" onClick={() => open("history", x)} title="Stock history" aria-label="Stock history"><Icon icon="mdi:history" width="18" height="18" /></button>
+      <button type="button" className="it-ibtn" onClick={() => open("item", x)} title="Edit item" aria-label="Edit item"><Icon icon="mdi:pencil-outline" width="18" height="18" /></button>
+    </div>
+  );
+  const Thumb = ({ x, size = 48 }) => (x.imageUrl ? <button type="button" className="it-zoom" style={{ width: size, height: size }} onClick={() => setPreview({ url: x.imageUrl, name: x.name })} title="View photo" aria-label={`View photo of ${x.name}`}><img src={x.imageUrl} alt="" className="it-thumb" style={{ width: size, height: size }} /><span className="it-zoom-ic"><Icon icon="mdi:magnify-plus-outline" width="18" height="18" /></span></button> : <span className="it-thumb" style={{ width: size, height: size }}><Icon icon="mdi:image-outline" width="22" height="22" /></span>);
+  const Meta = ({ x }) => <div className="it-meta">{[x.partNo, catLabel(cats, x.categoryId) || x.categoryName, x.binLocation && `Bin ${x.binLocation}`].filter(Boolean).join(" · ")}</div>;
 
   return (
-    <Panel
-      title={<>Items &amp; stock <Badge bg="secondary" pill>{items.length}</Badge></>}
-      icon="mdi:package-variant-closed"
-      action={
-        <div className="d-flex gap-2">
-          <Button size="sm" variant="outline-secondary" onClick={() => setCatOpen(true)}><Icon icon="mdi:shape-plus-outline" width="18" height="18" /> <span className="d-none d-sm-inline">Category</span></Button>
-          <Button size="sm" variant="outline-secondary" onClick={() => setListOpen("UNIT")}><Icon icon="mdi:ruler" width="18" height="18" /> <span className="d-none d-sm-inline">Units</span></Button>
-          <Button size="sm" variant="outline-secondary" onClick={() => setListOpen("QUALITY")}><Icon icon="mdi:medal-outline" width="18" height="18" /> <span className="d-none d-sm-inline">Quality</span></Button>
-          <Button size="sm" variant="outline-secondary" onClick={() => setListOpen("BIN")}><Icon icon="mdi:shelf" width="18" height="18" /> <span className="d-none d-sm-inline">Bins</span></Button>
-          <Button size="sm" onClick={() => open("item")} disabled={!lookups}><Icon icon="mdi:plus" width="18" height="18" /> Add item</Button>
+    <div className="it-wrap">
+      <style>{LIST_CSS}</style>
+      <div className="it-head">
+        <div className="it-title">
+          <span className="ic"><Icon icon="mdi:package-variant-closed" width="24" height="24" /></span>
+          <div><h2>Items &amp; stock</h2><small>{loading ? "Loading..." : `${items.length} item${items.length === 1 ? "" : "s"}${filtered ? " match your filters" : ""}`}</small></div>
         </div>
-      }
-    >
-      <Row className="g-2 mb-3">
-        <Col xs={12} md={4}>
-          <InputGroup>
-            <InputGroup.Text className="bg-white"><Icon icon="mdi:magnify" width="20" height="20" /></InputGroup.Text>
-            <FormControl value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name / part no / OEM / SKU / barcode" autoComplete="off" />
-          </InputGroup>
-        </Col>
-        <Col xs={6} md={3}>
-          <FormSelect value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+        <div className="it-actions">
+          <button type="button" className="it-btn ghost" onClick={() => setManageOpen(true)}><Icon icon="mdi:tune-variant" width="18" height="18" /> Manage lists</button>
+          <button type="button" className="it-btn" onClick={() => open("item")} disabled={!lookups}><Icon icon="mdi:plus" width="20" height="20" /> Add item</button>
+        </div>
+      </div>
+
+      <div className="it-kpis">
+        <div className="it-kpi"><span className="ic"><Icon icon="mdi:package-variant-closed" width="22" height="22" /></span><div><small>Items</small><b>{items.length}</b></div></div>
+        <div className="it-kpi"><span className="ic"><Icon icon="mdi:cash-multiple" width="22" height="22" /></span><div><small>Stock value (LKR)</small><b>{money(data?.stockValue || 0)}</b></div></div>
+        <div className="it-kpi warn"><span className="ic"><Icon icon="mdi:alert-outline" width="22" height="22" /></span><div><small>Low stock</small><b>{lowCount}</b></div></div>
+        <div className="it-kpi bad"><span className="ic"><Icon icon="mdi:package-variant-remove" width="22" height="22" /></span><div><small>Out of stock</small><b>{outCount}</b></div></div>
+      </div>
+
+      <div className="it-card">
+        <div className="it-filters">
+          <div className="it-search">
+            <Icon icon="mdi:magnify" width="18" height="18" />
+            <input className="it-in" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, part no, OEM, SKU, barcode" autoComplete="off" />
+            {q && <button type="button" className="it-clear" onClick={() => setQ("")} aria-label="Clear search"><Icon icon="mdi:close" width="16" height="16" /></button>}
+          </div>
+          <select className="it-sel" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} aria-label="Category">
             <option value="">All categories</option>
-            {(lookups?.categories || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </FormSelect>
-        </Col>
-        <Col xs={6} md={2}>
-          <FormSelect value={stockFilter} onChange={(e) => setStockFilter(e.target.value)}>
-            <option value="">All stock</option>
-            <option value="low">Low &amp; out</option>
-          </FormSelect>
-        </Col>
-        <Col xs={7} md={2} className="d-flex align-items-center">
-          <Form.Check type="switch" id="inv-hidden" label="Show hidden" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} />
-        </Col>
-        <Col xs={5} md={1} className="d-flex justify-content-end">
-          <ButtonGroup>
-            <Button variant={view === "table" ? "primary" : "outline-secondary"} onClick={() => setView("table")} title="Table"><Icon icon="mdi:table" width="18" height="18" /></Button>
-            <Button variant={view === "cards" ? "primary" : "outline-secondary"} onClick={() => setView("cards")} title="Cards"><Icon icon="mdi:view-grid-outline" width="18" height="18" /></Button>
-          </ButtonGroup>
-        </Col>
-      </Row>
+            {cats.filter((c) => !c.parentId).flatMap((c) => [<option key={c.id} value={c.id}>{c.name}</option>, ...cats.filter((x) => x.parentId === c.id).map((x) => <option key={x.id} value={x.id}>{"  └ "}{x.name}</option>)])}
+          </select>
+          <div className="it-seg" role="tablist">
+            <button type="button" className={!stockFilter ? "on" : ""} onClick={() => setStockFilter("")}>All stock</button>
+            <button type="button" className={stockFilter === "low" ? "on" : ""} onClick={() => setStockFilter("low")}>Low &amp; out</button>
+          </div>
+          <label className="it-chk"><input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} /> Show hidden</label>
+          <span className="it-spacer" />
+          {isFetching && data && <Spinner animation="border" size="sm" />}
+          {filtered && <button type="button" className="it-btn ghost" style={{ height: 38 }} onClick={() => { setQ(""); setCategoryId(""); setStockFilter(""); }}><Icon icon="mdi:filter-off-outline" width="18" height="18" /> Clear</button>}
+          <div className="it-seg">
+            <button type="button" className={view === "table" ? "on" : ""} onClick={() => setView("table")} title="Table" aria-label="Table view"><Icon icon="mdi:table" width="18" height="18" /></button>
+            <button type="button" className={view === "cards" ? "on" : ""} onClick={() => setView("cards")} title="Cards" aria-label="Card view"><Icon icon="mdi:view-grid-outline" width="18" height="18" /></button>
+          </div>
+        </div>
 
-      {!lookups || (isFetching && !data) ? (
-        <Loader text="Loading items..." />
-      ) : isError ? (
-        <Alert variant="danger" className="d-flex justify-content-between align-items-center">
-          <span>Failed to load items.</span>
-          <Button size="sm" variant="outline-danger" onClick={refetch}>Retry</Button>
-        </Alert>
-      ) : items.length === 0 ? (
-        <Empty text={dq || categoryId || stockFilter ? "No items match your filters" : "No items yet. Click Add item."} />
-      ) : view === "table" ? (
-        <Table responsive hover className="align-middle mb-0">
-          <thead className="table-light">
-            <tr><th>Item</th><th>Brand / quality</th><th className="text-end">On hand</th><th className="text-end">Reserved</th><th className="text-end">Available</th><th className="text-end">Avg cost</th><th className="text-end">Price</th><th className="text-end">Actions</th></tr>
-          </thead>
-          <tbody>
-            {items.map((x) => (
-              <tr key={x.id} className={!x.isActive ? "opacity-50" : ""}>
-                <td>
-                  <div className="d-flex align-items-center gap-2">
-                    {x.imageUrl ? <img src={x.imageUrl} alt="" width="40" height="40" className="rounded border flex-shrink-0" style={{ objectFit: "cover" }} /> : <span className="d-inline-flex align-items-center justify-content-center rounded bg-light text-muted border flex-shrink-0" style={{ width: 40, height: 40 }}><Icon icon="mdi:image-outline" width="20" height="20" /></span>}
-                    <div>
-                      <div className="fw-semibold">{x.name} {stockBadge(x)}</div>
-                      <small className="text-muted">{[x.partNo, x.categoryName, x.binLocation && `Bin ${x.binLocation}`, x.supplierName].filter(Boolean).join(" · ")}</small>
-                    </div>
+        {loading ? (
+          <div className="py-2">{[0, 1, 2, 3, 4].map((i) => <div key={i} className="it-skel" />)}</div>
+        ) : isError ? (
+          <div className="it-empty"><Icon icon="mdi:alert-circle-outline" width="44" height="44" /><b>Could not load the items</b><button type="button" className="it-btn mt-3" onClick={refetch}>Retry</button></div>
+        ) : items.length === 0 ? (
+          <div className="it-empty"><Icon icon="mdi:package-variant" width="52" height="52" />
+            <b>{filtered ? "No items match your filters" : "No items yet"}</b>
+            {filtered ? <span>Try a different search or clear the filters.</span> : <span>Add your first item to start tracking stock.</span>}
+            {!filtered && <div><button type="button" className="it-btn mt-3" onClick={() => open("item")}><Icon icon="mdi:plus" width="20" height="20" /> Add item</button></div>}
+          </div>
+        ) : view === "table" ? (
+          <div className="table-responsive">
+            <table className="it-table">
+              <thead><tr><th>Item</th><th className="it-hide-md">Brand / quality</th><th>Stock</th><th className="r it-hide-md">Cost</th><th className="r">Price</th><th className="r">Actions</th></tr></thead>
+              <tbody>
+                {items.map((x) => {
+                  const st = stockState(x);
+                  return (
+                    <tr key={x.id} className={x.isActive ? "" : "off"}>
+                      <td><div className="it-prod"><Thumb x={x} /><div><div className="it-name">{x.name}{!x.isActive && <span className="it-tag">Hidden</span>}</div><Meta x={x} /></div></div></td>
+                      <td className="it-hide-md"><span className="it-meta" style={{ fontSize: ".9rem" }}>{[x.brand, x.quality].filter(Boolean).join(" · ") || "-"}</span></td>
+                      <td>
+                        <div className="it-qty"><b>{qtyFmt(x.available)}</b> <small>{x.unit} available</small></div>
+                        <div className="it-meta">{qtyFmt(x.onHand)} on hand{x.reserved > 0 ? ` · ${qtyFmt(x.reserved)} reserved` : ""}</div>
+                        <span className={`it-pill ${st}`}>{STATE_LABEL[st]}</span>
+                        <div className={`it-bar ${st}`}><i style={{ width: `${level(x)}%` }} /></div>
+                      </td>
+                      <td className="r it-price it-hide-md"><b>{money(x.avgCost)}</b><small>avg cost</small></td>
+                      <td className="r it-price"><b>{money(x.price)}</b>{(x.layers || []).length > 1 && <small>{qtyFmt(x.layers[0].qty)} left @ this price, then {money(x.layers[1].price)}</small>}</td>
+                      <td className="r"><Acts x={x} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="it-grid">
+            {items.map((x) => {
+              const st = stockState(x);
+              return (
+                <div key={x.id} className={`it-tile ${x.isActive ? "" : "off"}`}>
+                  <div className="it-prod" style={{ minWidth: 0 }}><Thumb x={x} size={56} /><div style={{ minWidth: 0 }}><div className="it-name">{x.name}{!x.isActive && <span className="it-tag">Hidden</span>}</div><Meta x={x} /></div></div>
+                  <div className="row2">
+                    <div className="it-qty"><b style={{ fontSize: "1.4rem" }}>{qtyFmt(x.available)}</b> <small>{x.unit}</small><div><span className={`it-pill ${st}`}>{STATE_LABEL[st]}</span></div><div className={`it-bar ${st}`}><i style={{ width: `${level(x)}%` }} /></div></div>
+                    <div className="it-price r" style={{ textAlign: "right" }}><small>Price</small><b style={{ fontSize: "1.1rem" }}>LKR {money(x.price)}</b></div>
                   </div>
-                </td>
-                <td className="small">{[x.brand, x.quality].filter(Boolean).join(" · ") || "-"}</td>
-                <td className="text-end text-nowrap">{qtyFmt(x.onHand)} <small className="text-muted">{x.unit}</small></td>
-                <td className="text-end">{qtyFmt(x.reserved)}</td>
-                <td className="text-end">
-                  <div className={`fw-bold text-${tone(x)}`}>{qtyFmt(x.available)}</div>
-                  <ProgressBar now={x.reorderLevel > 0 ? Math.min(100, (x.available / (x.reorderLevel * 2)) * 100) : x.available > 0 ? 100 : 0} variant={tone(x)} style={{ height: 4, width: 64 }} className="ms-auto mt-1" />
-                </td>
-                <td className="text-end">{money(x.avgCost)}</td>
-                <td className="text-end">{money(x.price)}</td>
-                <td className="text-end text-nowrap">
-                  <div className="d-inline-flex gap-1">
-                    <Button size="sm" variant="primary" onClick={() => open("move", x, "GRN")} title="Receive stock"><Icon icon="mdi:package-down" width="16" height="16" /> Receive</Button>
-                    <Button size="sm" variant="outline-warning" onClick={() => open("move", x, "ISSUE")} title="Issue stock"><Icon icon="mdi:package-up" width="16" height="16" /></Button>
-                    <Button size="sm" variant="outline-success" onClick={() => open("move", x, "RETURN")} title="Return to stock"><Icon icon="mdi:undo-variant" width="16" height="16" /></Button>
-                    <Button size="sm" variant="outline-info" onClick={() => open("history", x)} title="Stock history"><Icon icon="mdi:history" width="16" height="16" /></Button>
-                    <Button size="sm" variant="outline-secondary" onClick={() => open("item", x)} title="Edit item"><Icon icon="mdi:pencil-outline" width="16" height="16" /></Button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      ) : (
-        <Row className="g-3">
-          {items.map((x) => (
-            <Col key={x.id} sm={6} lg={4} xxl={3}>
-              <Card className={`h-100 border ${!x.isActive ? "opacity-50" : ""}`}>
-                <Card.Body>
-                  <div className="d-flex justify-content-between align-items-start gap-2">
-                    <div style={{ minWidth: 0 }}>
-                      <div className="fw-semibold text-truncate">{x.name}</div>
-                      <small className="text-muted">{[x.partNo, x.categoryName].filter(Boolean).join(" · ")}</small>
-                    </div>
-                    {stockBadge(x)}
-                  </div>
-                  <div className="d-flex justify-content-between align-items-end mt-3">
-                    <div><div className="small text-muted">Available</div><div className={`fs-4 fw-bold lh-1 text-${tone(x)}`}>{qtyFmt(x.available)} <small className="fs-6 text-muted fw-normal">{x.unit}</small></div></div>
-                    <div className="text-end"><div className="small text-muted">Price</div><div className="fw-semibold">LKR {money(x.price)}</div></div>
-                  </div>
-                  <div className="small text-muted mt-2">{[x.brand, x.quality].filter(Boolean).join(" · ")}</div>
-                </Card.Body>
-                <Card.Footer className="bg-transparent border-0 pt-0 d-flex gap-1">
-                  <Button size="sm" variant="primary" className="flex-fill" onClick={() => open("move", x, "GRN")}><Icon icon="mdi:package-down" width="16" height="16" /> Receive</Button>
-                  <Button size="sm" variant="outline-warning" onClick={() => open("move", x, "ISSUE")} title="Issue stock"><Icon icon="mdi:package-up" width="16" height="16" /></Button>
-                  <Button size="sm" variant="outline-success" onClick={() => open("move", x, "RETURN")} title="Return to stock"><Icon icon="mdi:undo-variant" width="16" height="16" /></Button>
-                  <Button size="sm" variant="outline-info" onClick={() => open("history", x)} title="Stock history"><Icon icon="mdi:history" width="16" height="16" /></Button>
-                  <Button size="sm" variant="outline-secondary" onClick={() => open("item", x)} title="Edit item"><Icon icon="mdi:pencil-outline" width="16" height="16" /></Button>
-                </Card.Footer>
-              </Card>
-            </Col>
-          ))}
-        </Row>
+                  <div className="it-meta">{[x.brand, x.quality].filter(Boolean).join(" · ")}</div>
+                  <Acts x={x} />
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {!loading && !isError && items.length > 0 && <div className="it-foot"><span>Showing {items.length} item{items.length === 1 ? "" : "s"}</span><span>Stock value LKR {money(data?.stockValue || 0)}</span></div>}
+      </div>
+
+      {preview && (
+        <Modal show onHide={() => setPreview(null)} centered size="lg" dialogClassName="it-lb" backdropClassName="it-lb-bd">
+          <div className="it-lb-card">
+            <div className="it-lb-bar"><b>{preview.name}</b>
+              <span><a href={preview.url} target="_blank" rel="noreferrer" className="it-lb-btn" title="Open the photo in a new tab"><Icon icon="mdi:open-in-new" width="18" height="18" /></a>
+                <button type="button" className="it-lb-btn" onClick={() => setPreview(null)} aria-label="Close"><Icon icon="mdi:close" width="20" height="20" /></button></span></div>
+            <div className="it-lb-img"><img src={preview.url} alt={preview.name} /></div>
+          </div>
+        </Modal>
       )}
-      {isFetching && data && <div className="text-center mt-2"><Spinner animation="border" size="sm" /></div>}
-
-      {catOpen && <CategoriesModal onClose={() => setCatOpen(false)} />}
-      {listOpen === "UNIT" && <UnitsModal onClose={() => setListOpen(null)} />}
-      {listOpen === "QUALITY" && <QualitiesModal onClose={() => setListOpen(null)} />}
-      {listOpen === "BIN" && <BinsModal onClose={() => setListOpen(null)} />}
+      {manageOpen && <ManageListsModal onClose={() => setManageOpen(false)} />}
       {modal?.kind === "item" && <ItemModal item={modal.item} lookups={lookups} onClose={() => setModal(null)} />}
       {modal?.kind === "move" && <MovementModal item={modal.item} type={modal.type} lookups={lookups} onClose={() => setModal(null)} />}
       {modal?.kind === "history" && <HistoryModal item={modal.item} onClose={() => setModal(null)} />}
-    </Panel>
+    </div>
   );
 }

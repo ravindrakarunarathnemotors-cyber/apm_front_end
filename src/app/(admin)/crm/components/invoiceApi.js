@@ -9,7 +9,7 @@ const invoiceApi = apiSlice.injectEndpoints({
       query: (jobId) => `${P}/jobs/${jobId}`,
       providesTags: ["Evidence"],
     }),
-    updateInvoice: builder.mutation({            // { jobId, discountAmount?, taxEnabled?, taxPercent?, notes? }
+    updateInvoice: builder.mutation({            // { jobId, discountMode?, discountValue?, taxEnabled?, taxPercent?, notes? }
       query: ({ jobId, ...body }) => ({ url: `${P}/jobs/${jobId}`, method: "PUT", body }),
       invalidatesTags: ["Evidence"],
     }),
@@ -19,6 +19,10 @@ const invoiceApi = apiSlice.injectEndpoints({
     }),
     deleteInvoiceLine: builder.mutation({        // { jobId, lineId }
       query: ({ jobId, lineId }) => ({ url: `${P}/jobs/${jobId}/lines/${lineId}`, method: "DELETE" }),
+      invalidatesTags: ["Evidence"],
+    }),
+    setInvoiceLineDiscount: builder.mutation({   // { jobId, lineId, mode: "PERCENT" | "AMOUNT", value }
+      query: ({ jobId, lineId, ...body }) => ({ url: `${P}/jobs/${jobId}/lines/${lineId}/discount`, method: "PUT", body }),
       invalidatesTags: ["Evidence"],
     }),
     addInvoicePayment: builder.mutation({        // { jobId, amount, method, reference?, note?, paidAt? }
@@ -34,5 +38,5 @@ const invoiceApi = apiSlice.injectEndpoints({
 
 export const {
   useGetInvoiceQuery, useUpdateInvoiceMutation, useAddInvoiceLineMutation, useDeleteInvoiceLineMutation,
-  useAddInvoicePaymentMutation, useVoidInvoicePaymentMutation,
+  useAddInvoicePaymentMutation, useVoidInvoicePaymentMutation, useSetInvoiceLineDiscountMutation,
 } = invoiceApi;

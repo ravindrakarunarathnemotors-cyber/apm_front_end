@@ -438,7 +438,7 @@ function TeamForm({ data, onHide, onSaved, reload }) {
 export default function WashTeamInspectionModal({ jobId, onHide, onSaved }) {
   const { data, isLoading, isError, error, refetch } = useGetTeamCheckQuery(jobId, { skip: !jobId, refetchOnMountOrArgChange: true });
   return (
-    <Modal show={Boolean(jobId)} onHide={onHide} size="xl" fullscreen="md-down" scrollable centered backdrop="static" dialogClassName="cm-modal">
+    <Modal show={Boolean(jobId)} onHide={onHide} size="xl" fullscreen="xl-down" scrollable centered backdrop="static" dialogClassName="cm-modal">
       <style>{`
         @media (min-width: 992px) { .modal-dialog.cm-modal { --bs-modal-width: 860px; } }
         .cm-modal .modal-content { border: 0; border-radius: 18px; overflow: hidden; box-shadow: 0 24px 60px -18px rgba(0,0,0,.6); }

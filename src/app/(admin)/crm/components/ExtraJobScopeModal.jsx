@@ -6,7 +6,7 @@ import { Icon } from "@iconify/react";
 import Swal from "sweetalert2";
 import {
   useAddExtraScopeMutation, useCompleteExtraScopeMutation, useDeleteExtraScopeMutation,
-  useGetExtraScopesQuery, useGetExtraRepairTreeQuery, useSaveExtraScopeMutation, useSendExtraScopeSmsMutation,
+  useGetExtraScopesQuery, useGetExtraRepairTreeQuery, useSaveExtraScopeMutation, useSendExtraScopeSmsMutation, useUploadExtraScopeInventoryMutation,
 } from "./extraScopeApi";
 import { useSearchSpareLimitedQuery } from "./sparePartsSearchApi";
 import { useAddSpareOptionMutation } from "@/store/features/apiSlice";
@@ -29,17 +29,20 @@ const fail = (ex, fb) => Swal.fire({ title: "Failed", text: ex?.data?.message ||
 // amounts as typed numbers; same totals rule as the server
 // the price adjustment (%) is added to the unit price of every line: customer unit price = unit price + %
 const adjU = (pct, u) => Math.round((Number(u) || 0) * (100 + (Number(pct) || 0))) / 100;
-function calcTotals(f, pct) {
-  const A = (u) => adjU(pct, u);
+function calcTotals(f, pct, spct = pct) {
+  const A = (u) => adjU(pct, u);          // repair lines
+  const AS = (u) => adjU(spct, u);        // spare parts + third-party items (own price adjustment)
   // "Agreed scope only" applies to the repair (labour) lines; the spare parts are always part of the estimate (unless the customer brings them)
   const agreed = (x) => f.decision !== "REJECTED" && (f.decision !== "PARTIAL" || f.agreedScope.includes(x.id));
   const agreedPart = () => f.decision !== "REJECTED";
   const own = (x) => f.partsBy === "CLIENT" && f.clientParts.includes(x.id);
   const labour = f.incLabour === false ? 0 : f.labour.filter(agreed).reduce((s, x) => s + (x.qty || 1) * A(x.amount), 0);
-  const spare = f.incParts === false ? 0 : f.parts.filter((x) => agreedPart() && !own(x)).reduce((s, x) => s + x.qty * A(x.unitPrice), 0)
-    + f.quotes.filter(agreedPart).reduce((s, x) => s + (x.qty || 1) * A(x.price), 0);
+  const partsT = f.incParts === false ? 0 : f.parts.filter((x) => agreedPart() && !own(x)).reduce((s, x) => s + x.qty * AS(x.unitPrice), 0);
+  // third-party items: their own switch (default = follows the spare parts one); the ones the customer brings are not charged
+  const quotesT = (f.incQuotes ?? f.incParts) === false ? 0 : f.quotes.filter((x) => agreedPart() && !own(x)).reduce((s, x) => s + (x.qty || 1) * AS(x.price), 0);
+  const spare = partsT + quotesT;
   const r2 = (n) => Math.round(n * 100) / 100;
-  return { labour: r2(labour), spare: r2(spare), total: r2(labour + spare) };
+  return { labour: r2(labour), spare: r2(spare), total: r2(labour + spare), parts: r2(partsT), quotes: r2(quotesT) };
 }
 // estHours is stored as decimal hours (1.5 = 1 hr 30 min); the form shows Hours and Minutes separately (same as Customer Approval)
 const splitHM = (v) => { const t = Number(v) || 0; let h = Math.floor(t + 1e-6); let m = Math.round((t - h) * 60); if (m >= 60) { h += 1; m = 0; } return [h, m]; };
@@ -225,7 +228,7 @@ function PartSearch({ onAdd, disabled }) {
       </div>
       {typed && (
         <div className="border rounded-3 mt-1 bg-white overflow-hidden shadow-sm" style={{ maxHeight: 300, overflowY: "auto" }}>
-          {!isFetching && data.length === 0 && <div className="small text-muted p-3">No spare part found for &apos;{dq}&apos;. Add it manually below.</div>}
+          {!isFetching && data.length === 0 && <div className="small text-muted p-3">No spare part found for "{dq}". Add it manually below.</div>}
           {data.map((p) => (
             <button key={p.id} type="button" disabled={disabled} onClick={() => pick(p)} className={`d-flex align-items-center gap-2 w-100 text-start border-0 border-bottom px-3 py-2 ${added === p.id ? "bg-success-subtle" : "bg-white"}`}>
               <div className="flex-grow-1">
@@ -370,12 +373,22 @@ function ScopeEditor({ job, scope, onBack }) {
   const [save] = useSaveExtraScopeMutation();
   const [sendSmsApi] = useSendExtraScopeSmsMutation();
   const [complete, { isLoading: completing }] = useCompleteExtraScopeMutation();
+  const [uploadInv, { isLoading: uploadingInv }] = useUploadExtraScopeInventoryMutation();
   const readOnly = scope.status !== "OPEN";
   const setStep = (k) => { document.getElementById(`xs-${k}`)?.scrollIntoView({ behavior: "smooth", block: "center" }); };
-  const [f, setF] = useState(() => ({ ...scope.data, markupPercent: scope.data.markupPercent ?? null, repairParents: scope.data.repairParents || [], estHours: scope.data.estHours ?? "", estDays: scope.data.estDays ?? "" }));
+  const [f, setF] = useState(() => ({ ...scope.data, markupPercent: scope.data.markupPercent ?? null, sparePercent: scope.data.sparePercent ?? null, repairParents: scope.data.repairParents || [], estHours: scope.data.estHours ?? "", estDays: scope.data.estDays ?? "" }));
   const set = (p) => setF((x) => ({ ...x, ...p }));
+  // "Upload to ERP System": the spare parts + third-party items go to Inventory & Spare Parts; the button is enabled again after any change of them
+  const itemsKey = (x) => JSON.stringify([x.parts.map((p) => [p.id, p.partId, p.name, p.brand, p.quality, p.qty, Number(p.unitPrice) || 0]), x.quotes.map((q) => [q.id, q.description, q.photoUrl, q.qty || 1])]);
+  const [upSnap, setUpSnap] = useState(() => (scope.inventory?.needsUpload ? null : itemsKey(scope.data)));
+  const [upAt, setUpAt] = useState(scope.inventory?.sentAt || null);
+  const hasItems = f.parts.length + f.quotes.length > 0;
+  const needsUpload = hasItems && itemsKey(f) !== upSnap;
   const pct = Number(f.markupPercent ?? job.markupPercent) || 0;   // price adjustment: the one chosen in the Vehicle Job Inspection unless changed here
-  const A = (u) => adjU(pct, u);                                   // customer unit price
+  const A = (u) => adjU(pct, u);                                   // customer unit price (repair)
+  // spare parts + third-party items: own % of this scope, else the repair % chosen here, else the job's spare adjustment
+  const spct = Number(f.sparePercent ?? (f.markupPercent != null ? f.markupPercent : (job.sparePercent ?? job.markupPercent))) || 0;
+  const AS = (u) => adjU(spct, u);
   const [viewDoc, setViewDoc] = useState(false);              // estimate preview window
   const [showAdj, setShowAdj] = useState(false);              // "Show price breakdown"
   // The estimate (sent to the customer to get the confirmation) always shows the full price, even when the customer did not approve.
@@ -387,11 +400,11 @@ function ScopeEditor({ job, scope, onBack }) {
   const [replied, setReplied] = useState(null);   // "Did you receive the customer's confirmation?" (null = Yes when a decision already exists)
   const [viewKind, setViewKind] = useState("est");
   const [confirmOpen, setConfirmOpen] = useState(false);   // "Are you fully aware of the extra job details?"
-  const [sendSel, setSendSel] = useState({ labour: true, parts: true, time: true });
-  const estF = useMemo(() => ({ ...f, decision: f.decision === "REJECTED" ? null : f.decision, incLabour: sendSel.labour, incParts: sendSel.parts }), [f, sendSel]);
-  const tAll = useMemo(() => calcTotals({ ...estF, incLabour: true, incParts: true }, Number(f.markupPercent ?? job.markupPercent) || 0), [estF, f.markupPercent, job.markupPercent]);
-  const t = useMemo(() => calcTotals(estF, Number(f.markupPercent ?? job.markupPercent) || 0), [estF, job.markupPercent]);
-  const ap = useMemo(() => calcTotals(f, Number(f.markupPercent ?? job.markupPercent) || 0), [f, job.markupPercent]);
+  const [sendSel, setSendSel] = useState({ labour: true, parts: true, quotes: true, time: true });
+  const estF = useMemo(() => ({ ...f, decision: f.decision === "REJECTED" ? null : f.decision, incLabour: sendSel.labour, incParts: sendSel.parts, incQuotes: sendSel.quotes }), [f, sendSel]);
+  const tAll = useMemo(() => calcTotals({ ...estF, incLabour: true, incParts: true, incQuotes: true }, Number(f.markupPercent ?? job.markupPercent) || 0, spct), [estF, f.markupPercent, spct, job.markupPercent]);
+  const t = useMemo(() => calcTotals(estF, Number(f.markupPercent ?? job.markupPercent) || 0, spct), [estF, f.markupPercent, spct, job.markupPercent]);
+  const ap = useMemo(() => calcTotals(f, Number(f.markupPercent ?? job.markupPercent) || 0, spct), [f, spct, job.markupPercent]);
   const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const blankDraft = () => ({ key: nid("d"), description: "", photoUrl: "", qty: 1 });
@@ -442,7 +455,7 @@ function ScopeEditor({ job, scope, onBack }) {
     if (!file || !key) return;
     if (!file.type.startsWith("image/")) return Swal.fire({ title: "Only photos can be added here", icon: "info" });
     setPhotoBusy(key);
-    try { const url = await upload(file); if (url) patchDraft(key, { photoUrl: url }); } catch (ex) { fail(ex, "Upload failed"); } finally { setPhotoBusy(null); }
+    try { const url = await upload(file); if (url) { if (key.startsWith("q")) upd("quotes", key, { photoUrl: url }); else patchDraft(key, { photoUrl: url }); } } catch (ex) { fail(ex, "Upload failed"); } finally { setPhotoBusy(null); }
   };
 
   const addCatalog = (p) => set({ parts: [...f.parts, { id: nid("p"), partId: p.id, name: p.name, brand: p.brand || "", quality: p.quality || "", qty: 1, unitPrice: p.price, source: "CATALOG", stock: p.stockQty > 0 ? "IN_STOCK" : "OUT_OF_STOCK" }] });
@@ -452,12 +465,12 @@ function ScopeEditor({ job, scope, onBack }) {
     set({ parts: [...f.parts, { id: nid("p"), partId: null, name: manual.name.trim(), brand: manual.brand, quality: manual.quality || qualities[0] || "", qty, unitPrice: Number(manual.unitPrice || 0), source: "MANUAL", stock: "UNKNOWN" }] });
     setManual({ name: "", brand: "", quality: "", qty: 1, unitPrice: "" });
   };
-  const addQuote = () => {
-    const filled = drafts.filter((d) => d.description.trim() || d.photoUrl);
-    if (!filled.length) return Swal.fire({ title: "Add a description of the item", icon: "info" });
-    if (filled.some((d) => !d.description.trim())) return Swal.fire({ title: "Add a description for every item", text: "Each item with a photo needs a description.", icon: "info" });
-    set({ quotes: [...f.quotes, ...filled.map((d) => ({ id: nid("q"), description: d.description.trim(), photoUrl: d.photoUrl, qty: Math.max(1, parseInt(d.qty, 10) || 1), price: 0 }))] });
-    setDrafts([blankDraft()]);
+  // a third-party item is added to the list as soon as its description is filled in (nothing is requested yet: it goes to Inventory with "Upload to ERP System")
+  const commitDraft = (key) => {
+    const d = drafts.find((x) => x.key === key);
+    if (!d || !d.description.trim()) return;
+    set({ quotes: [...f.quotes, { id: nid("q"), description: d.description.trim(), photoUrl: d.photoUrl, qty: Math.max(1, parseInt(d.qty, 10) || 1), price: 0 }] });
+    setDrafts((x) => { const r = x.filter((y) => y.key !== key); return r.length ? r : [blankDraft()]; });
   };
   const upd = (key, id, p) => set({ [key]: f[key].map((x) => (x.id === id ? { ...x, ...p } : x)) });
   const del = (key, id) => set({ [key]: f[key].filter((x) => x.id !== id), agreedScope: f.agreedScope.filter((x) => x !== id), clientParts: f.clientParts.filter((x) => x !== id) });
@@ -490,8 +503,8 @@ function ScopeEditor({ job, scope, onBack }) {
     return {
       labour: sel.labour ? F.labour.filter(agreed) : [],
       parts: sel.parts ? F.parts.filter((x) => agreedPart() && !own(x)) : [],
-      quotes: sel.parts ? F.quotes.filter(agreedPart) : [],
-      ownParts: sel.parts ? F.parts.filter((x) => agreedPart() && own(x)) : [],
+      quotes: (sel.quotes ?? sel.parts) ? F.quotes.filter((x) => agreedPart() && !own(x)) : [],
+      ownParts: [...(sel.parts ? F.parts.filter((x) => agreedPart() && own(x)) : []), ...((sel.quotes ?? sel.parts) ? F.quotes.filter((x) => agreedPart() && own(x)).map((x) => ({ name: x.description, qty: x.qty || 1 })) : [])],
     };
   };
   const itemsEst = useMemo(() => itemsOf(estF, sendSel), [f, estF, sendSel]);
@@ -499,19 +512,33 @@ function ScopeEditor({ job, scope, onBack }) {
   // "approved" = the estimate of what the customer confirmed (Customer confirmation section); otherwise the estimate sent to get the confirmation
   const buildHtml = (approved = false) => {
     const t = approved ? ap : tEst;
-    const items = approved ? itemsOf(f, { labour: true, parts: true, time: true }) : itemsEst;
+    const items = approved ? itemsOf(f, { labour: true, parts: true, quotes: true, time: true }) : itemsEst;
     const showTime = approved ? true : sendSel.time;
     const logo = company.logoUrl || `${window.location.origin}/images/mainlogo.jpeg`;
     const R = 'style="text-align:right"';
     const rows = (list, fn) => list.map(fn).join("");
-    const css = `@page{size:A4;margin:14mm}:root{--brand:#8f0b0b;--gold:#a8864f;--ink:#1c1917;--muted:#78716c;--line:#e7e2dc}*{box-sizing:border-box}body{font-family:"Segoe UI",Helvetica,Arial,sans-serif;color:var(--ink);margin:0;font-size:12.5px;line-height:1.45;-webkit-print-color-adjust:exact;print-color-adjust:exact}.page{max-width:794px;margin:0 auto;padding:24px 28px}.top{display:flex;justify-content:space-between;align-items:center;padding-bottom:14px;border-bottom:3px solid var(--brand)}.top img{height:56px}.brandname{font-size:19px;font-weight:800;letter-spacing:.1em;color:var(--brand)}.t{font-size:22px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:var(--brand);text-align:right}h2{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--brand);margin:20px 0 8px}table{width:100%;border-collapse:collapse;font-size:12px}th{background:var(--brand);color:#fff;text-align:left;padding:7px 9px;font-size:10.5px;text-transform:uppercase}td{padding:7px 9px;border-bottom:1px solid var(--line)}.sum{margin:18px 0 0 auto;width:320px;border:1px solid var(--line)}.sum div{display:flex;justify-content:space-between;padding:7px 12px;border-bottom:1px solid var(--line)}.sum .g{background:var(--brand);color:#fff;font-weight:700;font-size:14px}.note{color:var(--muted);margin:6px 0}.foot{margin-top:26px;padding-top:8px;border-top:2px solid var(--gold);text-align:center;color:var(--muted);font-size:10.5px}`;
+    // company address / phone / email under the company name, and the vehicle details of the job
+    const coLines = [company.address, [company.phone, company.email].filter(Boolean).join("  ·  "), company.website].filter(Boolean).map((x) => esc(x).replace(/\n/g, "<br/>")).join("<br/>");
+    const vehRows = [
+      ["Vehicle no", job.regNo], ["Chassis no", job.chassisNo], ["Engine no", job.engineNo],
+      ["Year", job.yearOfManufacture], ["Colour", job.colour], ["Mileage", job.mileageKm ? `${Number(job.mileageKm).toLocaleString()} km` : ""], ["Tyre size", job.tyreSize],
+    ].filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== "").map(([k, v]) => `<span>${k}</span><b>${esc(String(v))}</b>`).join("");
+    const css = `@page{size:A4;margin:14mm}:root{--brand:#8f0b0b;--gold:#a8864f;--ink:#1c1917;--muted:#78716c;--line:#e7e2dc}*{box-sizing:border-box}body{font-family:"Segoe UI",Helvetica,Arial,sans-serif;color:var(--ink);margin:0;font-size:12.5px;line-height:1.45;-webkit-print-color-adjust:exact;print-color-adjust:exact}.page{max-width:794px;margin:0 auto;padding:24px 28px}.top{display:flex;justify-content:space-between;align-items:center;padding-bottom:14px;border-bottom:3px solid var(--brand)}.top img{height:56px}.brandname{font-size:19px;font-weight:800;letter-spacing:.1em;color:var(--brand)}.t{font-size:22px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:var(--brand);text-align:right}h2{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--brand);margin:20px 0 8px}table{width:100%;border-collapse:collapse;font-size:12px}th{background:var(--brand);color:#fff;text-align:left;padding:7px 9px;font-size:10.5px;text-transform:uppercase}td{padding:7px 9px;border-bottom:1px solid var(--line)}.sum{margin:18px 0 0 auto;width:320px;border:1px solid var(--line)}.sum div{display:flex;justify-content:space-between;padding:7px 12px;border-bottom:1px solid var(--line)}.sum .g{background:var(--brand);color:#fff;font-weight:700;font-size:14px}.note{color:var(--muted);margin:6px 0}.foot{margin-top:26px;padding-top:8px;border-top:2px solid var(--gold);text-align:center;color:var(--muted);font-size:10.5px}.top{align-items:flex-start;gap:18px}.top>div:first-child{flex:1 1 auto;min-width:0}.top>.doc{flex:0 0 auto;max-width:42%;text-align:right}.top img{max-width:120px}.brandname{font-size:16px;letter-spacing:.05em;line-height:1.25;overflow-wrap:anywhere}.t{white-space:nowrap}.co{overflow-wrap:anywhere;font-size:10.5px;line-height:1.5;color:#57534e;margin-top:3px}.dm{margin-top:6px;font-size:11.5px;display:inline-grid;grid-template-columns:auto auto;gap:1px 12px;text-align:left}.dm span{color:var(--muted)}.dm b{text-align:right}.parties{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:16px 0 6px;align-items:stretch}.box{border:1px solid var(--line);border-radius:6px;overflow:hidden}.box h3{margin:0;background:#f6f4f1;padding:6px 12px;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--brand);border-bottom:1px solid var(--line)}.box .b{padding:9px 12px;font-size:12px;line-height:1.6}.vg{display:grid;grid-template-columns:auto 1fr;gap:2px 14px}.vg span{color:var(--muted)}`;
     return `<!doctype html><html><head><meta charset="utf-8"><title>Extra Job Scope ${esc(job.jobNo)}</title><style>${css}</style></head><body><div class="page">
-<div class="top"><div style="display:flex;align-items:center;gap:12px"><img src="${logo}" alt="" onerror="this.style.display='none'"/><div class="brandname">${esc(company.name)}</div></div><div class="t">${approved ? "Approved Estimate" : "Extra Estimate"}</div></div>
-<p class="note">Job <b>${esc(job.jobNo)}</b> · Vehicle <b>${esc(job.regNo)}</b> · Customer <b>${esc(job.customerName)}</b> · Extra Job Scope #${scope.seq} · ${new Date().toLocaleDateString()}</p>
+<div class="top">
+  <div style="display:flex;align-items:center;gap:12px"><img src="${logo}" alt="" onerror="this.style.display='none'"/><div style="min-width:0"><div class="brandname">${esc(company.name)}</div>${coLines ? `<div class="co">${coLines}</div>` : ""}</div></div>
+  <div class="doc"><div class="t">${approved ? "Approved Estimate" : "Extra Estimate"}</div>
+    <div class="dm"><span>Estimate no</span><b>${esc(job.jobNo)}-X${scope.seq}</b><span>Date</span><b>${new Date().toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}</b>${job.departmentName ? `<span>Department</span><b>${esc(job.departmentName)}</b>` : ""}</div></div>
+</div>
+<div class="parties">
+  <div class="box"><h3>Customer</h3><div class="b"><b style="font-size:13px">${esc(job.customerName)}</b>${job.customerAddress ? `<br/>${esc(job.customerAddress).replace(/\n/g, "<br/>")}` : ""}${job.contactNumber ? `<br/>Tel: ${esc(job.contactNumber)}` : ""}${job.customerEmail ? `<br/>${esc(job.customerEmail)}` : ""}</div></div>
+  <div class="box"><h3>Vehicle</h3><div class="b"><div class="vg">${vehRows}</div></div></div>
+</div>
+<p class="note" style="margin-top:8px">Extra Job Scope #${scope.seq}</p>
 ${showTime ? `<p class="note">Estimated time of repair: <b>${esc(timeText(f) || "-")}</b></p>` : ""}
 ${f.rootCauses.length ? `<p class="note"><b>Findings:</b> ${f.rootCauses.map(esc).join("; ")}</p>` : ""}
 ${items.ownParts.length ? `<p class="note"><b>Spare parts provided by the customer (not charged):</b> ${items.ownParts.map((p) => `${esc(p.name)} × ${p.qty}`).join("; ")}</p>` : ""}
-${items.parts.length || items.quotes.length ? `<h2>Spare parts</h2><table><thead><tr><th>Item</th><th>Brand</th><th ${R}>Qty</th><th ${R}>Unit price</th><th ${R}>Total</th></tr></thead><tbody>${rows(items.parts, (p) => `<tr><td><b>${esc(p.name)}</b></td><td>${esc(p.brand || "-")}</td><td ${R}>${p.qty}</td><td ${R}>${money(A(p.unitPrice))}</td><td ${R}><b>${money(p.qty * A(p.unitPrice))}</b></td></tr>`)}${rows(items.quotes, (q) => `<tr><td><b>${esc(q.description)}</b> (third party)</td><td>-</td><td ${R}>${q.qty || 1}</td><td ${R}>${money(A(q.price))}</td><td ${R}><b>${money((q.qty || 1) * A(q.price))}</b></td></tr>`)}</tbody></table>` : ""}
+${items.parts.length || items.quotes.length ? `<h2>Spare parts</h2><table><thead><tr><th>Item</th><th>Brand</th><th ${R}>Qty</th><th ${R}>Unit price</th><th ${R}>Total</th></tr></thead><tbody>${rows(items.parts, (p) => `<tr><td><b>${esc(p.name)}</b></td><td>${esc(p.brand || "-")}</td><td ${R}>${p.qty}</td><td ${R}>${money(AS(p.unitPrice))}</td><td ${R}><b>${money(p.qty * AS(p.unitPrice))}</b></td></tr>`)}${rows(items.quotes, (q) => `<tr><td><b>${esc(q.description)}</b> (third party)</td><td>-</td><td ${R}>${q.qty || 1}</td><td ${R}>${money(AS(q.price))}</td><td ${R}><b>${money((q.qty || 1) * AS(q.price))}</b></td></tr>`)}</tbody></table>` : ""}
 ${items.labour.length ? `<h2>Labour</h2><table><thead><tr><th>Work</th><th ${R}>Qty</th><th ${R}>Unit price</th><th ${R}>Amount</th></tr></thead><tbody>${rows(items.labour, (l) => `<tr><td>${esc(childOf(l.description))}</td><td ${R}>${l.qty || 1}</td><td ${R}>${money(A(l.amount))}</td><td ${R}><b>${money((l.qty || 1) * A(l.amount))}</b></td></tr>`)}</tbody></table>` : ""}
 <div class="sum"><div><span>Spare parts</span><b>${money(t.spare)}</b></div><div><span>Labour</span><b>${money(t.labour)}</b></div><div class="g"><span>${approved ? "Approved total" : "Estimated total"}</span><span>${money(t.total)}</span></div></div>
 ${termsHtml(termsData?.terms?.estimate)}
@@ -538,10 +565,19 @@ ${termsHtml(termsData?.terms?.estimate)}
     setBusy(true);
     try {
       await flush();
-      const r = await sendSmsApi({ jobId: job.id, scopeId: scope.id, phone, approved, includeLabour: sendSel.labour, includeParts: sendSel.parts, includeTime: sendSel.time }).unwrap();
+      const r = await sendSmsApi({ jobId: job.id, scopeId: scope.id, phone, approved, html: buildHtml(approved), includeLabour: sendSel.labour, includeParts: sendSel.parts, includeQuotes: sendSel.quotes, includeTime: sendSel.time }).unwrap();
       if (r.sms?.sent) { if (!approved) { set({ sentVia: "SMS" }); snap.current = JSON.stringify({ ...f, sentVia: "SMS" }); } Swal.fire({ title: "SMS sent", text: r.sms.to ? `Sent to ${r.sms.to}` : "", icon: "success", timer: 1800, showConfirmButton: false }); }
       else Swal.fire({ title: "SMS not sent", text: r.sms?.error || "Could not send the SMS.", icon: "error" });
     } catch (ex) { fail(ex, "Could not send the SMS."); } finally { setBusy(false); }
+  };
+
+  const uploadToInventory = async () => {
+    try {
+      await flush();
+      const r = await uploadInv({ jobId: job.id, scopeId: scope.id }).unwrap();
+      setUpSnap(itemsKey(f)); setUpAt(r.inventory?.sentAt || new Date().toISOString());
+      Swal.fire({ title: "Sent to Inventory & Spare Parts", html: `<div class="text-muted" style="font-size:.9rem">${r.parts} spare part(s) and ${r.quotes} third-party item(s) are now in <strong>Inventory &amp; Spare Parts &rarr; Job Orders &rarr; Spare part orders</strong> (marked <strong>Extra #${scope.seq}</strong>).</div>`, icon: "success" });
+    } catch (ex) { fail(ex, "Could not upload to the ERP."); }
   };
 
   const finish = async () => {
@@ -552,6 +588,7 @@ ${termsHtml(termsData?.terms?.estimate)}
     if (f.decision === "PARTIAL" && f.labour.length > 0 && !f.agreedScope.length) return stop("Tick the repair items the customer agreed.", "approval");
     if (f.decision !== "REJECTED" && f.parts.length + f.quotes.length > 0 && !f.partsBy) return stop("Select who provides the spare parts.", "approval");
     if (f.decision !== "REJECTED" && f.partsBy === "CLIENT" && !f.clientParts.length) return stop("Tick the spare parts the customer brings.", "approval");
+    if (f.decision !== "REJECTED" && needsUpload) return stop("First upload the spare parts to Inventory: press \"Upload to ERP System\" in the Spare Parts step, then complete this Extra Job Scope.", "parts");
     setConfirmOpen(true);
   };
   const confirmStart = async () => {
@@ -560,11 +597,11 @@ ${termsHtml(termsData?.terms?.estimate)}
 
   const dis = readOnly;
   const labourTotal = f.labour.reduce((s, x) => s + (x.qty || 1) * A(x.amount), 0);
-  const partsTotal = f.parts.reduce((s, x) => s + x.qty * A(x.unitPrice), 0) + f.quotes.reduce((s, x) => s + (x.qty || 1) * A(x.price), 0);
+  const partsTotal = f.parts.reduce((s, x) => s + x.qty * AS(x.unitPrice), 0) + f.quotes.reduce((s, x) => s + (x.qty || 1) * AS(x.price), 0);
   const everyItem = [
     ...f.labour.map((x) => ({ id: x.id, label: `${childOf(x.description)}${(x.qty || 1) > 1 ? ` × ${x.qty}` : ""}`, sub: "Labour", amount: (x.qty || 1) * A(x.amount) })),
-    ...f.parts.map((x) => ({ id: x.id, label: `${x.name}${x.brand ? ` (${x.brand})` : ""} × ${x.qty}`, sub: "Spare part", amount: x.qty * A(x.unitPrice) })),
-    ...f.quotes.map((x) => ({ id: x.id, label: `${x.description}${(x.qty || 1) > 1 ? ` × ${x.qty}` : ""}`, sub: "Third party item", amount: (x.qty || 1) * A(x.price) })),
+    ...f.parts.map((x) => ({ id: x.id, label: `${x.name}${x.brand ? ` (${x.brand})` : ""} × ${x.qty}`, sub: "Spare part", amount: x.qty * AS(x.unitPrice) })),
+    ...f.quotes.map((x) => ({ id: x.id, label: `${x.description}${(x.qty || 1) > 1 ? ` × ${x.qty}` : ""}`, sub: "Third party item", amount: (x.qty || 1) * AS(x.price) })),
   ];
 
   return (
@@ -621,17 +658,17 @@ ${termsHtml(termsData?.terms?.estimate)}
               <div className="xs-adj-main">
                 <span className="xs-adj-ico"><Icon icon="mdi:percent" width="20" height="20" /></span>
                 <div style={{ flex: 1 }}>
-                  <div className="fw-semibold">Price adjustment</div>
-                  <div className="small text-muted">Added to the price of every spare part and repair item</div>
+                  <div className="fw-semibold">Price adjustment · Repair</div>
+                  <div className="small text-muted">Added to the price of every repair item. Spare parts have their own adjustment in Spare Parts Requirement.</div>
                 </div>
-                <FormSelect aria-label="Price adjustment" style={{ maxWidth: 140 }} value={pct} disabled={dis} onChange={(e) => set({ markupPercent: Number(e.target.value) })}>
+                <FormSelect aria-label="Repair price adjustment" style={{ maxWidth: 140 }} value={pct} disabled={dis} onChange={(e) => set({ markupPercent: Number(e.target.value) })}>
                   <option value={0}>None</option>
-                  {[2, 5, 8, 10, 12].map((x) => <option key={x} value={x}>+ {x}%</option>)}
+                  {[...new Set([...(scopesData?.options?.markups || [0, 2, 5, 8, 10, 12]), pct])].filter((x) => x > 0).sort((a, b) => a - b).map((x) => <option key={x} value={x}>+ {x}%</option>)}   {/* the list comes from Settings > Pricing */}
                 </FormSelect>
               </div>
-              <div className={`mt-2 ${pct === 0 ? "opacity-50" : ""}`}>
-                <Form.Check type="switch" id="xs-showadj" label="Show price breakdown" checked={showAdj && pct > 0} disabled={pct === 0} onChange={(e) => setShowAdj(e.target.checked)} />
-                <div className="small text-muted">{pct === 0 ? "Choose a percentage first." : "Shows the actual price and the increase under each price."}</div>
+              <div className={`mt-2 ${pct === 0 && spct === 0 ? "opacity-50" : ""}`}>
+                <Form.Check type="switch" id="xs-showadj" label="Show price breakdown" checked={showAdj && (pct > 0 || spct > 0)} disabled={pct === 0 && spct === 0} onChange={(e) => setShowAdj(e.target.checked)} />
+                <div className="small text-muted">{pct === 0 && spct === 0 ? "Choose a percentage first." : "Shows the actual price and the increase under each price."}</div>
               </div>
             </div>
             {f.repairParents.map((rp) => {
@@ -730,12 +767,21 @@ ${termsHtml(termsData?.terms?.estimate)}
       {(
         <>
           <Section id="parts" title="Spare Parts Requirement" icon="mdi:cog-transfer-outline" hint="Search the item master and click a part to add it. If the stock is not available, update the price manually.">
-            {pct > 0 && (
-              <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
-                <div className="small text-muted">Price adjustment +{pct}% is added to every unit price.</div>
-                <Form.Check type="switch" id="xs-showadj2" label="Show price breakdown" checked={showAdj} onChange={(e) => setShowAdj(e.target.checked)} />
+            <div className="xs-adj mb-2">
+              <div className="xs-adj-main">
+                <span className="xs-adj-ico"><Icon icon="mdi:percent" width="20" height="20" /></span>
+                <div style={{ flex: 1 }}>
+                  <div className="fw-semibold">Price adjustment · Spare parts</div>
+                  <div className="small text-muted">Added to the price of every spare part and third-party item{f.sparePercent == null ? " (now the same as the repair adjustment)" : ""}</div>
+                </div>
+                <FormSelect aria-label="Spare parts price adjustment" style={{ maxWidth: 190 }} value={f.sparePercent == null ? "same" : String(f.sparePercent)} disabled={dis}
+                  onChange={(e) => set({ sparePercent: e.target.value === "same" ? null : Number(e.target.value) })}>
+                  <option value="same">Same as repair ({(Number(f.markupPercent ?? job.markupPercent) || 0) === 0 ? "None" : `+${Number(f.markupPercent ?? job.markupPercent)}%`})</option>
+                  <option value="0">None</option>
+                  {[...new Set([...(scopesData?.options?.markups || [0, 2, 5, 8, 10, 12]), spct])].filter((x) => x > 0).sort((a, b) => a - b).map((x) => <option key={x} value={String(x)}>+ {x}%</option>)}
+                </FormSelect>
               </div>
-            )}
+            </div>
             {!dis && (
               <div className="rounded-3 p-3 mb-3" style={{ background: "#f4f5f7", border: "1px solid #e5e7eb" }}>
                 <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
@@ -745,7 +791,7 @@ ${termsHtml(termsData?.terms?.estimate)}
                   </Button>
                 </div>
                 <PartSearch onAdd={addCatalog} />
-                <div className="small text-muted">Search the item master and click an item to add it. Can&apos;t find it? Use &apos;Add item manually&apos;.</div>
+                <div className="small text-muted">Search the item master and click an item to add it. Can't find it? Use "Add item manually".</div>
               </div>
             )}
             <div className="table-responsive">
@@ -767,15 +813,15 @@ ${termsHtml(termsData?.terms?.estimate)}
                       <td className="small">{p.quality || "-"}</td>
                       <td><FormControl type="number" min="1" style={{ minHeight: 36, padding: "4px 8px" }} disabled={dis} value={p.qty} onChange={(e) => upd("parts", p.id, { qty: Math.max(1, parseInt(e.target.value, 10) || 1) })} /></td>
                       <td className="text-end text-nowrap">
-                        <div className="fw-semibold">{money(A(p.unitPrice))}</div>
-                        {pct > 0 && showAdj && (<><div className="small text-muted">Actual: {money(p.unitPrice)}</div><div className="small text-success">+{money(A(p.unitPrice) - Number(p.unitPrice || 0))} ({pct}%)</div></>)}
+                        <div className="fw-semibold">{money(AS(p.unitPrice))}</div>
+                        {spct > 0 && showAdj && (<><div className="small text-muted">Actual: {money(p.unitPrice)}</div><div className="small text-success">+{money(AS(p.unitPrice) - Number(p.unitPrice || 0))} ({spct}%)</div></>)}
                       </td>
-                      <td className="text-end text-nowrap"><b>{money(p.qty * A(p.unitPrice))}</b>{pct > 0 && showAdj && <div className="small text-success">+{money(p.qty * (A(p.unitPrice) - Number(p.unitPrice || 0)))} increase</div>}</td>
+                      <td className="text-end text-nowrap"><b>{money(p.qty * AS(p.unitPrice))}</b>{spct > 0 && showAdj && <div className="small text-success">+{money(p.qty * (AS(p.unitPrice) - Number(p.unitPrice || 0)))} increase</div>}</td>
                       <td>{!dis && <Button size="sm" variant="outline-danger" onClick={() => del("parts", p.id)}><Icon icon="mdi:delete-outline" width="16" height="16" /></Button>}</td>
                     </tr>
                   ))}
                 </tbody>
-                {f.parts.length > 0 && <tfoot><tr><th colSpan={6} className="text-end">Total</th><th className="text-end text-nowrap">{money(f.parts.reduce((x, p) => x + p.qty * A(p.unitPrice), 0))}</th><th /></tr></tfoot>}
+                {f.parts.length > 0 && <tfoot><tr><th colSpan={6} className="text-end">Total</th><th className="text-end text-nowrap">{money(f.parts.reduce((x, p) => x + p.qty * AS(p.unitPrice), 0))}</th><th /></tr></tfoot>}
               </Table>
             </div>
             {!dis && showManual && (
@@ -792,11 +838,11 @@ ${termsHtml(termsData?.terms?.estimate)}
               </div>
             )}
           </Section>
-          <Section title="Request quotation from third parties" icon="mdi:storefront-outline" hint="Item photo + description + quantity, then press Request. The price is entered later, when the quotation comes back.">
+          <Section title="Third-party items" icon="mdi:storefront-outline" hint="Take a photo, describe the item and set the quantity: it is added to the list automatically. Nothing is requested until you press Upload to ERP System. The price is entered later, when the quotation comes back.">
             {f.quotes.map((q, i) => (
               <div className="xs-row" key={q.id} style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
                 <span className="xs-letter">{letter(i)}.</span>
-                <div style={{ flex: 1, minWidth: 180 }}>{q.photoUrl && <a href={q.photoUrl} target="_blank" rel="noreferrer" className="me-2 align-middle d-inline-block" title="Open the photo"><img src={q.photoUrl} alt="Item" style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 10, border: "1px solid #e5e7eb" }} /></a>}{q.description}
+                <div style={{ flex: 1, minWidth: 180 }}>{!q.photoUrl && !dis && (photoBusy === q.id ? <Spinner size="sm" className="me-2" /> : <span className="me-2 d-inline-flex gap-1 align-middle"><Button size="sm" variant="outline-secondary" title="Take a photo" onClick={() => pickPhoto(q.id, "camera")}><Icon icon="mdi:camera" /></Button><Button size="sm" variant="outline-secondary" title="Choose a photo" onClick={() => pickPhoto(q.id, "gallery")}><Icon icon="mdi:image-outline" /></Button></span>)}{q.photoUrl && <a href={q.photoUrl} target="_blank" rel="noreferrer" className="me-2 align-middle d-inline-block" title="Open the photo"><img src={q.photoUrl} alt="Item" style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 10, border: "1px solid #e5e7eb" }} /></a>}{q.description}
                   <div className="small">{Number(q.price) > 0 ? <Badge bg="success">Quoted</Badge> : <Badge bg="warning" text="dark">Waiting for quotation</Badge>}</div></div>
                 <div style={{ width: 90 }}>
                   <label className="xs-lbl">Quantity</label>
@@ -806,7 +852,7 @@ ${termsHtml(termsData?.terms?.estimate)}
                   <label className="xs-lbl">Quoted price (Rs.)</label>
                   <FormControl type="number" min="0" step="0.01" placeholder="When received" value={q.price} disabled={dis} onChange={(e) => upd("quotes", q.id, { price: e.target.value })} />
                 </div>
-                {Number(q.price) > 0 && <div className="text-end" style={{ minWidth: 120 }}><label className="xs-lbl">Total{pct > 0 ? ` (+${pct}%)` : ""}</label><div className="fw-semibold">{money((q.qty || 1) * A(q.price))}</div></div>}
+                {Number(q.price) > 0 && <div className="text-end" style={{ minWidth: 120 }}><label className="xs-lbl">Total{spct > 0 ? ` (+${spct}%)` : ""}</label><div className="fw-semibold">{money((q.qty || 1) * AS(q.price))}</div></div>}
                 {!dis && <Button size="sm" variant="outline-danger" onClick={() => del("quotes", q.id)}><Icon icon="mdi:close" /></Button>}
               </div>
             ))}
@@ -835,7 +881,7 @@ ${termsHtml(termsData?.terms?.estimate)}
                     </div>
                     <div style={{ flex: 1, minWidth: 200 }}>
                       <label className="xs-lbl">Description</label>
-                      <FormControl placeholder="Describe the item you need a quotation for" value={d.description} onChange={(e) => patchDraft(d.key, { description: e.target.value })} />
+                      <FormControl placeholder="Describe the item, then press Enter to add it" value={d.description} onChange={(e) => patchDraft(d.key, { description: e.target.value })} onBlur={() => commitDraft(d.key)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitDraft(d.key); } }} />
                     </div>
                     <div style={{ width: 100 }}>
                       <label className="xs-lbl">Quantity</label>
@@ -844,13 +890,19 @@ ${termsHtml(termsData?.terms?.estimate)}
                     {drafts.length > 1 && <Button variant="outline-danger" aria-label="Remove this item" onClick={() => setDrafts((x) => x.filter((y) => y.key !== d.key))}><Icon icon="mdi:close" /></Button>}
                   </div>
                 ))}
-                <div className="d-flex flex-wrap gap-2 mt-2">
-                  <Button variant="outline-secondary" onClick={() => setDrafts((x) => [...x, blankDraft()])}><Icon icon="mdi:plus" /> Add another item</Button>
-                  <Button variant="primary" onClick={addQuote}><Icon icon="mdi:send-outline" /> Request{drafts.filter((d) => d.description.trim()).length > 1 ? ` (${drafts.filter((d) => d.description.trim()).length} items)` : ""}</Button>
-                </div>
               </div>
             )}
           </Section>
+          {hasItems && (
+            <Section title="Inventory & Spare Parts" icon="mdi:warehouse" hint="Upload the spare parts and the third-party items to the ERP. The Inventory team gets a notification, reserves / issues the parts and answers the third-party prices.">
+              <div className="d-flex flex-wrap align-items-center justify-content-between gap-2">
+                <div className="small text-muted">{!needsUpload && upAt ? `Uploaded to Inventory ${new Date(upAt).toLocaleString()} · Job Orders → Spare part orders (Extra #${scope.seq})` : upAt ? "Changed after the last upload: upload again" : "Not uploaded to Inventory & Spare Parts yet"}</div>
+                {!dis && <Button variant={needsUpload ? "primary" : "outline-success"} className="fw-semibold" disabled={uploadingInv || !needsUpload} onClick={uploadToInventory}>
+                  {uploadingInv ? <Spinner size="sm" /> : <Icon icon={needsUpload ? "mdi:send-outline" : "mdi:check-circle-outline"} width="18" height="18" />} {needsUpload ? "Upload to ERP System" : "Uploaded"}
+                </Button>}
+              </div>
+            </Section>
+          )}
           <div className="xs-total"><span>Total spare parts value</span><b>{money(partsTotal)}</b></div>
         </>
       )}
@@ -878,7 +930,8 @@ ${termsHtml(termsData?.terms?.estimate)}
             <div className="xs-sum">
               {[
                 ["labour", "Repair items", `${f.labour.length} item(s) · ${money(tAll.labour)}`],
-                ["parts", "Spare parts", `${f.parts.length + f.quotes.length} item(s) · ${money(tAll.spare)}`],
+                ["parts", "Spare parts", `${f.parts.length} item(s) · ${money(tAll.parts)}`],
+                ...(f.quotes.length ? [["quotes", "Third-party quotations", `${f.quotes.length} item(s) · ${money(tAll.quotes)}`]] : []),
                 ["time", "Estimated time", timeText(f) || "Not set"],
               ].map(([k, label, v]) => (
                 <button key={k} type="button" role="switch" aria-checked={sendSel[k]} className={`xs-selchip ${sendSel[k] ? "on" : ""}`} onClick={() => setSendSel((x) => ({ ...x, [k]: !x[k] }))}>
@@ -936,11 +989,17 @@ ${termsHtml(termsData?.terms?.estimate)}
               </div>
               {f.partsBy === "CLIENT" && (
                 <div className="mt-3">
-                  <div className="xs-hint">Tick the spare parts the customer brings (they are not charged).</div>
+                  <div className="xs-hint">Tick the spare parts and third-party items the customer brings (they are not charged).</div>
                   {f.parts.map((p) => (
                     <label key={p.id} className={`xs-tick ${f.clientParts.includes(p.id) ? "on" : ""}`}>
                       <Form.Check type="checkbox" disabled={dis} checked={f.clientParts.includes(p.id)} onChange={() => tickIn("clientParts", p.id)} />
                       <span style={{ flex: 1 }}>{p.name} {p.brand} × {p.qty}</span>
+                    </label>
+                  ))}
+                  {f.quotes.map((q) => (
+                    <label key={q.id} className={`xs-tick ${f.clientParts.includes(q.id) ? "on" : ""}`}>
+                      <Form.Check type="checkbox" disabled={dis} checked={f.clientParts.includes(q.id)} onChange={() => tickIn("clientParts", q.id)} />
+                      <span style={{ flex: 1 }}>{q.description} × {q.qty || 1} <Badge bg="info" text="dark" className="ms-1">Third party</Badge></span>
                     </label>
                   ))}
                 </div>
@@ -955,7 +1014,7 @@ ${termsHtml(termsData?.terms?.estimate)}
               <Button variant="outline-secondary" disabled={!canAp} onClick={() => print(true)}><Icon icon="mdi:printer-outline" /> Print</Button>
               {!dis && <Button variant="primary" disabled={!canAp || busy} onClick={() => sendSms(true)}><Icon icon="mdi:message-text-outline" /> Send via SMS</Button>}
             </div>
-            {!canAp && <div className="small text-muted mt-2">Choose the customer&apos;s decision first. The approved estimate is available when the approved total is more than Rs. 0.00.</div>}
+            {!canAp && <div className="small text-muted mt-2">Choose the customer's decision first. The approved estimate is available when the approved total is more than Rs. 0.00.</div>}
           </Section>
           </div>
           {!dis && (

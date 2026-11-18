@@ -6,7 +6,6 @@ import { Icon } from "@iconify/react";
 import Swal from "sweetalert2";
 import { useGetEmployeesQuery, useGetJobTeamAllocationQuery, useSaveJobTeamAllocationMutation } from "@/store/features/apiSlice";
 import { getDepartmentUi } from "./departmentConfig";
-import { usePermissions } from "./permissionsApi"; // action permissions
 import ManageTeamsBaysModal from "./ManageTeamsBaysModal"; // opens on top of this window as its own popup
 
 // Stage 6 · Team Allocation  (every department)
@@ -18,7 +17,6 @@ export default function TeamAllocationModal({ jobId, onHide, onSaved }) {
   });
   const [save, { isLoading: saving }] = useSaveJobTeamAllocationMutation();
 
-  const { can } = usePermissions();
   const [managing, setManaging] = useState(false); // "Manage teams and bays" popup
   const [teamId, setTeamId] = useState("");
   const [bayId, setBayId] = useState("");
@@ -191,7 +189,7 @@ export default function TeamAllocationModal({ jobId, onHide, onSaved }) {
       .ta-modal .ta-jobno { display: inline-block; background: #111; color: #fff; border-radius: 8px; padding: 3px 10px; font-weight: 700; font-size: .85rem; box-shadow: inset 3px 0 0 #c8102e; }
       .ta-modal .ta-plate { display: inline-flex; background: #facc15; color: #111; border: 1.5px solid #111; border-radius: 6px; padding: 1px 9px; font-weight: 800; font-size: .82rem; letter-spacing: .05em; }
     `}</style>
-    <Modal show onHide={saving ? undefined : close} centered scrollable fullscreen="md-down" backdrop="static" enforceFocus={!managing} dialogClassName="ta-modal">
+    <Modal show onHide={saving ? undefined : close} centered scrollable fullscreen="xl-down" backdrop="static" enforceFocus={!managing} dialogClassName="ta-modal">
       <Modal.Header closeButton={!saving} closeVariant="white" className="ta-head">
         <Modal.Title className="fs-5 d-flex align-items-center gap-2 text-white">
           <Icon icon="mdi:account-group-outline" width="28" height="28" />
@@ -218,11 +216,9 @@ export default function TeamAllocationModal({ jobId, onHide, onSaved }) {
                 <span className="ta-jobno">{job.jobNo}</span>
                 <span className="ta-plate">{job.regNo}</span>
               </div>
-              {(can("team.manage") || can("bay.manage")) && (
-                <Button size="sm" variant="outline-primary" onClick={() => setManaging(true)}>
-                  <Icon icon="mdi:cog-outline" width="18" height="18" /> Manage teams and bays
-                </Button>
-              )}
+              <Button size="sm" variant="outline-primary" onClick={() => setManaging(true)}>
+                <Icon icon="mdi:cog-outline" width="18" height="18" /> Manage teams and bays
+              </Button>
             </div>
 
             {readOnly && <Alert variant="secondary" className="py-2">This job is not ready for team allocation yet.</Alert>}

@@ -16,6 +16,9 @@ import {
   useSaveJobInspectionMutation,
 } from "@/store/features/apiSlice";
 import SparePartsSections from "./SparePartsSections";
+import InvoiceModal from "./InvoiceModal";
+import { useSetJobSpareMarkupMutation } from "./priceAdjustmentApi";
+import { useLazyGetInspectionHistoryQuery } from "./inspectionHistoryApi";
 import { useSetJobMarkupMutation, useSetRepairWarrantyMutation, useUpdateRepairQtyMutation } from "./inspectionQtyApi";
 
 // Mechanical Stage 7 · Vehicle Job Inspection
@@ -154,6 +157,144 @@ function LineList({ lines, onChange, disabled, placeholder = "Write here" }) {
   );
 }
 
+// ---- Diagnosis: numbered list with soft inputs (used for Identified Faults and Root Cause) ----
+const DG_CSS = `
+.dg-scan { border: 1.5px dashed #cbd5e1; border-radius: 14px; background: #f8fafc; padding: 14px; transition: border-color .15s, background .15s; }
+.dg-scan.drag { border-color: #0f172a; background: #eef2f7; }
+.dg-scan-h { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.dg-scan-ic { width: 42px; height: 42px; border-radius: 12px; background: #0f172a; color: #fff; display: grid; place-items: center; flex: none; }
+.dg-scan-t { font-weight: 700; color: #0f172a; line-height: 1.2; } .dg-scan-s { color: #64748b; font-size: .82rem; }
+.dg-btn { display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 14px; border-radius: 10px; border: 1.5px solid #0f172a; background: #fff; color: #0f172a; font-weight: 600; cursor: pointer; margin-left: auto; }
+.dg-btn:hover { background: #0f172a; color: #fff; } .dg-btn:disabled { opacity: .55; cursor: default; }
+.dg-files { display: grid; gap: 8px; margin-top: 12px; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); }
+.dg-file { display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 8px 10px; min-width: 0; }
+.dg-file .ic { width: 36px; height: 36px; border-radius: 9px; background: #f1f5f9; color: #334155; display: grid; place-items: center; flex: none; }
+.dg-file a { color: #0f172a; font-weight: 600; text-decoration: none; min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .dg-file a:hover { text-decoration: underline; }
+.dg-file button { width: 30px; height: 30px; border: 0; border-radius: 8px; background: transparent; color: #64748b; display: grid; place-items: center; cursor: pointer; } .dg-file button:hover { background: #f1f5f9; color: #0f172a; }
+.dg-grid { display: grid; gap: 14px; grid-template-columns: 1fr 1fr; margin-top: 14px; }
+@media (max-width: 575px) { .vj-modal .modal-footer { flex-wrap: wrap; } .vj-modal .modal-footer > .btn { flex: 1 1 140px; } .dg-scan, .dg-panel { padding: 12px; } }
+@media (max-width: 767px) { .dg-grid { grid-template-columns: 1fr; } .dg-btn { margin-left: 0; } }
+.dg-panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 14px; min-width: 0; }
+.dg-panel-h { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.dg-panel-h .ic { width: 32px; height: 32px; border-radius: 9px; background: #f1f5f9; color: #0f172a; display: grid; place-items: center; }
+.dg-panel-h b { color: #0f172a; } .dg-panel-h small { display: block; color: #64748b; font-size: .78rem; line-height: 1.2; }
+.dg-count { margin-left: auto; min-width: 26px; height: 24px; border-radius: 999px; background: #0f172a; color: #fff; font-size: .78rem; font-weight: 700; display: grid; place-items: center; padding: 0 8px; }
+.dg-count.zero { background: #e2e8f0; color: #64748b; }
+.dg-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.dg-n { width: 26px; height: 26px; border-radius: 8px; background: #f1f5f9; color: #475569; font-weight: 700; font-size: .8rem; display: grid; place-items: center; flex: none; }
+.dg-row input { flex: 1; min-width: 0; height: 42px; border: 1px solid #d5dbe3; border-radius: 10px; padding: 0 12px; background: #fff; color: #0f172a; outline: none; }
+.dg-row input:focus { border-color: #0f172a; box-shadow: 0 0 0 3px rgba(15,23,42,.1); } .dg-row input:disabled { background: #f8fafc; color: #475569; }
+.dg-x { width: 34px; height: 34px; border: 0; border-radius: 8px; background: transparent; color: #94a3b8; display: grid; place-items: center; cursor: pointer; flex: none; } .dg-x:hover { background: #f1f5f9; color: #0f172a; }
+.dg-add { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: #0f172a; font-weight: 600; padding: 6px 4px; cursor: pointer; } .dg-add:hover { text-decoration: underline; }
+.dg-link { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px 12px; border-radius: 12px; background: #f1f5f9; color: #475569; font-size: .84rem; }
+.dg-link b { color: #0f172a; }
+`;
+function DiagList({ lines, onChange, disabled, placeholder, icon, title, sub }) {
+  const set = (i, v) => onChange(lines.map((x, n) => (n === i ? v : x)));
+  const filled = lines.filter((x) => x.trim()).length;
+  return (
+    <div className="dg-panel">
+      <div className="dg-panel-h">
+        <span className="ic"><Icon icon={icon} width="18" height="18" /></span>
+        <div><b>{title}</b><small>{sub}</small></div>
+        <span className={`dg-count ${filled ? "" : "zero"}`}>{filled}</span>
+      </div>
+      {lines.map((v, i) => (
+        <div key={i} className="dg-row">
+          <span className="dg-n">{i + 1}</span>
+          <input autoComplete="off" maxLength={300} value={v} disabled={disabled} placeholder={placeholder} onChange={(e) => set(i, e.target.value)} />
+          {!disabled && lines.length > 1 && <button type="button" className="dg-x" aria-label="Remove line" onClick={() => onChange(lines.filter((_, n) => n !== i))}><Icon icon="mdi:close" width="18" height="18" /></button>}
+        </div>
+      ))}
+      {!disabled && <button type="button" className="dg-add" onClick={() => onChange([...lines, ""])}><Icon icon="mdi:plus-circle-outline" width="18" height="18" /> Add another</button>}
+    </div>
+  );
+}
+const fileIcon = (name = "") => (/\.pdf$/i.test(name) ? "mdi:file-pdf-box" : /\.(png|jpe?g|webp|gif)$/i.test(name) ? "mdi:file-image-outline" : /\.(csv|xls|xlsx)$/i.test(name) ? "mdi:file-table-outline" : "mdi:file-document-outline");
+
+// ---- Price adjustment: chips + live effect (used under the Repair list and under the Spare Parts table) ----
+const PA_CSS = `
+.vj-modal .pa { margin-top: 14px; background: #fff; border: 1px solid #e5e7eb; border-radius: 16px; padding: 14px 16px; }
+.vj-modal .pa-h { display: flex; align-items: center; gap: 12px; }
+.vj-modal .pa-ico { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; background: #111827; color: #fff; flex: none; }
+.vj-modal .pa-h b { display: block; color: var(--ink); line-height: 1.2; } .vj-modal .pa-h small { display: block; color: var(--mut); font-size: .8rem; line-height: 1.3; }
+.vj-modal .pa-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.vj-modal .pa-chip { border: 1.5px solid #d6d9de; background: #fff; color: #374151; border-radius: 999px; min-height: 38px; padding: 0 16px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all .12s; }
+.vj-modal .pa-chip:hover:not(:disabled) { border-color: #111827; }
+.vj-modal .pa-chip.on { background: #111827; border-color: #111827; color: #fff; box-shadow: 0 2px 6px rgba(17,24,39,.25); }
+.vj-modal .pa-chip:disabled { cursor: default; opacity: .6; }
+.vj-modal .pa-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 20px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #eef0f3; }
+.vj-modal .pa-sum { font-size: .88rem; color: #374151; } .vj-modal .pa-sum b { color: var(--ink); } .vj-modal .pa-sum .up { color: #15803d; font-weight: 700; }
+.vj-modal .pa-foot .form-check { margin: 0; } .vj-modal .pa-foot .form-check-label { font-weight: 600; color: var(--ink); } .vj-modal .pa-foot .form-check-input { width: 2.4em; height: 1.3em; }
+@media (max-width: 575px) { .vj-modal .pa { padding: 12px; } .vj-modal .pa-chip { flex: 1 1 22%; justify-content: center; padding: 0 8px; border-radius: 12px; } .vj-modal .pa-chip.wide { flex-basis: 100%; } }
+`;
+function PriceAdjust({ title, sub, value, options, onChange, disabled, busy, base, final, pctNow, showAdj, onShowAdj, switchId, empty }) {
+  const diff = Math.round((final - base) * 100) / 100;
+  return (
+    <div className="pa">
+      <div className="pa-h">
+        <span className="pa-ico"><Icon icon="mdi:percent-outline" width="20" height="20" /></span>
+        <div style={{ minWidth: 0 }}><b>{title}</b><small>{sub}</small></div>
+        {busy && <Spinner size="sm" className="ms-auto" />}
+      </div>
+      <div className="pa-chips" role="radiogroup" aria-label={title}>
+        {options.map((o) => (
+          <button key={o.value} type="button" role="radio" aria-checked={value === o.value} disabled={disabled} className={`pa-chip ${value === o.value ? "on" : ""} ${o.value === "same" ? "wide" : ""}`} onClick={() => value !== o.value && onChange(o.value)}>
+            {value === o.value && <Icon icon="mdi:check" width="16" height="16" />}{o.label}
+          </button>
+        ))}
+      </div>
+      <div className="pa-foot">
+        <div className="pa-sum">
+          {empty ? "Add items to see the effect." : pctNow > 0 ? <>Base <b>{money(base)}</b> <span className="up">+ {money(diff)} ({pctNow}%)</span> = <b>{money(final)}</b></> : <>No price adjustment · <b>{money(final)}</b></>}
+        </div>
+        <Form.Check type="switch" id={switchId} label="Show price breakdown" checked={showAdj && pctNow > 0} disabled={pctNow === 0} onChange={(e) => onShowAdj(e.target.checked)} />
+      </div>
+    </div>
+  );
+}
+
+// ---- Vehicle History / ERP check ----
+const HX_CSS = `
+.hx-tl { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); }
+.hx-job { display: flex; align-items: center; gap: 12px; background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px 12px; min-width: 0; text-align: left; }
+.hx-job .ic { width: 40px; height: 40px; border-radius: 11px; background: #f1f5f9; color: #334155; display: grid; place-items: center; flex: none; }
+.hx-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.hx-top { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
+.hx-top b { color: #0f172a; font-size: .98rem; line-height: 1.2; overflow-wrap: anywhere; } .hx-main small { color: #64748b; line-height: 1.2; }
+.hx-st { font-size: .68rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; background: #e2e8f0; color: #334155; white-space: nowrap; }
+.hx-go { display: inline-flex; align-items: center; gap: 2px; color: #475569; font-weight: 600; font-size: .82rem; flex: none; } .hx-click:hover .hx-go { color: #0f172a; }
+@media (max-width: 575px) { .hx-go-t { display: none; } .hx-job { padding: 10px; gap: 10px; } .hx-job .ic { width: 36px; height: 36px; } }
+.hx-empty { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 12px; background: #f8fafc; border: 1px dashed #cbd5e1; color: #64748b; }
+.hx-qs { display: grid; gap: 10px; margin-top: 14px; }
+.hx-q { display: flex; align-items: center; gap: 12px; background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 10px 12px; flex-wrap: wrap; }
+.hx-q .ic { width: 38px; height: 38px; border-radius: 11px; background: #f1f5f9; color: #0f172a; display: grid; place-items: center; flex: none; }
+.hx-q.yes .ic { background: #0f172a; color: #fff; }
+.hx-q .t { flex: 1 1 0; min-width: 120px; } .hx-q .t b { color: #0f172a; display: block; line-height: 1.25; } .hx-q .t small { color: #64748b; display: block; line-height: 1.25; }
+.hx-seg { display: inline-flex; background: #f1f5f9; border-radius: 12px; padding: 3px; gap: 2px; flex: none; }
+.hx-seg button { border: 0; background: transparent; height: 36px; min-width: 76px; padding: 0 14px; border-radius: 9px; font-weight: 700; color: #64748b; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; transition: all .12s; }
+.hx-seg button.on-yes { background: #0f172a; color: #fff; box-shadow: 0 1px 3px rgba(15,23,42,.3); } .hx-seg button.on-no { background: #fff; color: #0f172a; box-shadow: 0 1px 3px rgba(15,23,42,.18); }
+.hx-seg button:disabled { cursor: default; opacity: .7; }
+.hx-note { margin-top: 12px; } .hx-note label { display: flex; align-items: center; gap: 6px; font-weight: 600; color: #334155; font-size: .85rem; margin-bottom: 6px; }
+.hx-note textarea { width: 100%; border: 1px solid #d5dbe3; border-radius: 12px; padding: 10px 12px; resize: vertical; outline: none; color: #0f172a; background: #fff; }
+.hx-note textarea:focus { border-color: #0f172a; box-shadow: 0 0 0 3px rgba(15,23,42,.1); }
+@media (max-width: 575px) { .hx-seg { width: 100%; } .hx-seg button { flex: 1; } }
+`;
+function HxQuestion({ icon, title, sub, value, onChange, disabled }) {
+  return (
+    <div className={`hx-q ${value === true ? "yes" : ""}`}>
+      <span className="ic"><Icon icon={icon} width="20" height="20" /></span>
+      <div className="t"><b>{title}</b><small>{sub}</small></div>
+      <div className="hx-seg" role="group" aria-label={title}>
+        <button type="button" disabled={disabled} className={value === true ? "on-yes" : ""} aria-pressed={value === true} onClick={() => onChange(value === true ? null : true)}>
+          {value === true && <Icon icon="mdi:check" width="16" height="16" />} Yes
+        </button>
+        <button type="button" disabled={disabled} className={value === false ? "on-no" : ""} aria-pressed={value === false} onClick={() => onChange(value === false ? null : false)}>No</button>
+      </div>
+    </div>
+  );
+}
+
 // Yes / No (tri-state: null = not answered)
 // Big tap-friendly choice buttons (replaces the small radio circles). options: [{ value, label, icon, tone: "green" | "amber" | "dark" }]
 const TONES = { green: ["#16a34a", "#f0fdf4", "#14532d"], amber: ["#d97706", "#fffbeb", "#78350f"], dark: ["#111827", "#f3f4f6", "#111827"] };
@@ -217,19 +358,20 @@ function Card({ title, hint, children, right, icon = "mdi:clipboard-text-outline
   );
 }
 
-const Concern = ({ title, list, open, setOpen, extra }) => (
+const Concern = ({ title, list, open, setOpen, extra, note }) => (
   <div className="border rounded-3 p-2 px-3 mb-2 bg-white">
     <div className="d-flex justify-content-between align-items-center">
-      <div className="fw-semibold">{title} <Badge bg="secondary" pill>{list.length + (extra ? 1 : 0)}</Badge></div>
+      <div className="fw-semibold">{title} <Badge bg="secondary" pill>{list.length + (extra ? 1 : 0) + (note ? 1 : 0)}</Badge></div>
       <Button size="sm" variant="outline-primary" onClick={() => setOpen(!open)}><Icon icon={open ? "mdi:eye-off-outline" : "mdi:eye-outline"} width="16" height="16" /> {open ? "Hide" : "View"}</Button>
     </div>
     <Collapse in={open}>
       <div>
         <div className="pt-2">
           {extra && <div className="mb-1"><span className="text-muted small">Complaint: </span>{extra}</div>}
-          {list.length === 0 && !extra ? <span className="text-muted small">Nothing recorded.</span> : list.map((c, n) => (
+          {list.length === 0 && !extra && !note ? <span className="text-muted small">Nothing recorded.</span> : list.map((c, n) => (
             <div key={n} className="d-flex gap-2"><span className="fw-semibold text-muted" style={{ width: 20 }}>{letter(n)}.</span><span>{c.name}<span className="text-muted small"> · {c.title}</span></span></div>
           ))}
+          {note && <div className="mt-1" style={{ whiteSpace: "pre-wrap" }}><span className="text-muted small">Additional note: </span>{note}</div>}
         </div>
       </div>
     </Collapse>
@@ -267,6 +409,18 @@ export default function VehicleJobInspectionModal({ jobId, onHide, onSaved }) {
   const [newRepair, setNewRepair] = useState(null);
   const [warranty, setWarranty] = useState(null);
   const [historyRemarks, setHistoryRemarks] = useState("");
+  // earlier jobs of this vehicle: loaded from the server only when "Related to a previous repair?" is Yes, 3 at a time
+  const [loadHistory] = useLazyGetInspectionHistoryQuery();
+  const [hist, setHist] = useState({ items: [], total: 0, hasMore: false, loaded: false, loading: false, failed: false });
+  const [invoiceJobId, setInvoiceJobId] = useState(null);   // an earlier job whose invoice is being viewed
+  const moreHistory = async () => {
+    setHist((h) => ({ ...h, loading: true, failed: false }));
+    try {
+      const r = await loadHistory({ jobId, offset: hist.items.length, limit: 3 }).unwrap();
+      setHist((h) => ({ items: [...h.items, ...(r.items || [])], total: r.total || 0, hasMore: !!r.hasMore, loaded: true, loading: false, failed: false }));
+    } catch (_) { setHist((h) => ({ ...h, loading: false, failed: true, loaded: true })); }
+  };
+  useEffect(() => { if (previousRepair === true && !hist.loaded && !hist.loading && jobId) moreHistory(); /* eslint-disable-next-line */ }, [previousRepair, jobId]);
   const [repairTypes, setRepairTypes] = useState([]);
   const [extraParents, setExtraParents] = useState([]); // repair types added here (not picked in the complaint stage): [{ parent, department }]
   const [signer, setSigner] = useState("");
@@ -281,13 +435,16 @@ export default function VehicleJobInspectionModal({ jobId, onHide, onSaved }) {
   const [showSub, setShowSub] = useState(false);
   // spare parts are recorded in this window too (departments with a spare parts stage right after the inspection)
   const { data: spData } = useGetSparePartsQuery(jobId, { skip: !jobId });
-  const [showAdj, setShowAdj] = useState(false); // toggle: show the actual price / increase lines under the adjusted prices (default off)
+  const [showAdj, setShowAdj] = useState(false); // Repair list: show the actual price / increase lines under the adjusted prices (default off)
+  const [showAdjSpare, setShowAdjSpare] = useState(false); // Spare parts: its own switch
   const [updateQty] = useUpdateRepairQtyMutation();
   const [setRepairWarranty] = useSetRepairWarrantyMutation();
   const [setMarkup, { isLoading: savingMarkup }] = useSetJobMarkupMutation();
+  const [setSpareMarkup, { isLoading: savingSpareMarkup }] = useSetJobSpareMarkupMutation();
   const [qtyLive, setQtyLive] = useState({}); // qty typed in the Repair list table (saved when the cursor leaves the box)
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const [form, setForm] = useState({ description: "", qty: "1", amount: "", repairType: "" }); // new repair line
   const [editId, setEditId] = useState(null);
   const [edit, setEdit] = useState({ description: "", qty: "1", amount: "", repairType: "" }); // alternate line
@@ -336,14 +493,21 @@ export default function VehicleJobInspectionModal({ jobId, onHide, onSaved }) {
   const pct = Number(data?.markupPercent || 0);
   // the % is added to the UNIT PRICE of each line, so the line amount = qty x (unit price + %)
   const adjUnit = (u) => Math.round((Number(u) || 0) * (100 + pct)) / 100;
+  // spare parts have their own adjustment (by default the same as the repair one)
+  const sparePct = Number(data?.sparePercent ?? data?.markupPercent ?? 0);
+  const adjUnitS = (u) => Math.round((Number(u) || 0) * (100 + sparePct)) / 100;
   // "Warranty available? Yes": a line marked as a warranty claim is shown as "Warranty claim" and is not charged
   const wOn = warranty === true;
   const claimed = (x) => Boolean(wOn && x?.warrantyClaim);
   const repairGross = active.filter((r) => !claimed(r)).reduce((sum, r) => sum + (r.qty || 1) * adjUnit(r.unitPrice ?? r.amount), 0);
   const spareGross = spData
-    ? (spData.items || []).filter((i) => !claimed(i)).reduce((sum, i) => sum + i.qty * adjUnit(i.unitPrice), 0)
-      + (spData.quotes || []).filter((q) => q.quotedPrice != null).reduce((sum, q) => sum + adjUnit(q.quotedPrice), 0)
+    ? (spData.items || []).filter((i) => !claimed(i)).reduce((sum, i) => sum + i.qty * adjUnitS(i.unitPrice), 0)
+      + (spData.quotes || []).filter((q) => q.quotedPrice != null).reduce((sum, q) => sum + adjUnitS(q.quotedPrice), 0)
     : 0;
+  const repairBase = active.filter((r) => !claimed(r)).reduce((sum, r) => sum + (r.qty || 1) * Number(r.unitPrice ?? r.amount ?? 0), 0);
+  const spareBase = spData ? (spData.items || []).filter((i) => !claimed(i)).reduce((sum, i) => sum + i.qty * Number(i.unitPrice || 0), 0) + (spData.quotes || []).filter((q) => q.quotedPrice != null).reduce((sum, q) => sum + Number(q.quotedPrice || 0), 0) : 0;
+  const pctOptions = [...new Set([...(data?.markupOptions || [0, 2, 5, 8, 10, 12]), pct])].sort((a, b) => a - b);
+  const sparePctOptions = [...new Set([...(data?.markupOptions || [0, 2, 5, 8, 10, 12]), sparePct])].sort((a, b) => a - b);
   const old = (data?.repairItems || []).filter((r) => r.status !== "ACTIVE");
   // Show the problem in a SweetAlert; when it is closed, jump to the section that needs fixing (opens it if collapsed)
   const problem = (msg, anchor) => {
@@ -361,8 +525,9 @@ export default function VehicleJobInspectionModal({ jobId, onHide, onSaved }) {
   };
   const fail = (ex, fb) => Swal.fire({ title: "Failed", text: ex?.data?.message || ex?.message || fb, icon: "error" });
 
+  const showFaults = testRun === "NECESSARY";   // Faults are asked only when a test run is necessary
   const payload = (complete) => ({
-    jobId, testRun, faultsFound, faults, identifiedFaults: identified, rootCauses: roots,
+    jobId, testRun, faultsFound: showFaults ? faultsFound : false, faults: showFaults ? faults : [], identifiedFaults: identified, rootCauses: roots,
     previousRepair, newRepair, warranty, historyRemarks, extraParents,
     // the parent types picked in the complaint stage are always included
     repairTypes: [...new Set([...shownGroups.map((g) => g.parent), ...repairTypes])],
@@ -373,12 +538,14 @@ export default function VehicleJobInspectionModal({ jobId, onHide, onSaved }) {
     setError("");
     if (complete) {
       if (!testRun) return problem("Select whether a test run is necessary.", "testrun");
-      if (faultsFound === null) return problem("Select Record Faults or No Faults Found.", "faults");
-      if (faultsFound && !faults.some((x) => x.trim())) return problem("Record at least one fault.", "faults");
+      if (showFaults && faultsFound === null) return problem("Select Record Faults or No Faults Found.", "faults");
+      if (showFaults && faultsFound && !faults.some((x) => x.trim())) return problem("Record at least one fault.", "faults");
       if (signer.trim().length < 2) return problem("Select the head mechanic.", "sign");
       if (people.length > 0 && !people.some((p) => p.name === signer.trim())) return problem("Select the head mechanic from the list.", "sign");
       if (!signature) return problem("The head mechanic must draw the signature.", "sign");
       if (spData?.canRecord && !signed && spData.items.length === 0 && !spData.header.noParts) return problem("Add the spare parts, or tick 'No spare parts needed'.", "spare");
+      // the lists must be sent to Inventory & Spare Parts before the job may move on
+      if (spData?.canRecord && !signed && ((spData.items || []).length > 0 || (spData.quotes || []).length > 0) && spData.header?.needsUpload) return problem("First press \"Send to Inventory & Spare Parts\" for the spare parts and quotation requests, then sign and complete.", "spare-send");
       const ok = await Swal.fire({ title: "Sign and complete?", text: `${job.jobNo}: the inspection will be signed by ${signer.trim()} and the job moves to the next stage.`, icon: "question", showCancelButton: true, confirmButtonText: "Sign & complete" });
       if (!ok.isConfirmed) return;
     }
@@ -416,6 +583,9 @@ export default function VehicleJobInspectionModal({ jobId, onHide, onSaved }) {
   };
 
   // amount in the form = unit price; the line total (qty x unit price) is calculated by the server
+  const changeSpareMarkup = async (value) => {   // "same" = follow the repair adjustment
+    try { await setSpareMarkup({ jobId, percent: value === "same" ? null : Number(value) }).unwrap(); refetch(); } catch (ex) { fail(ex, "Could not change the spare parts price adjustment."); }
+  };
   const changeMarkup = async (percent) => { try { await setMarkup({ jobId, percent }).unwrap(); } catch (ex) { fail(ex, "Could not change the price adjustment."); } };
   const toggleClaim = async (r, claim) => { try { await setRepairWarranty({ jobId, itemId: r.id, claim }).unwrap(); } catch (ex) { fail(ex, "Could not change the warranty claim."); } };
   const commitQty = async (r) => {
@@ -546,7 +716,8 @@ export default function VehicleJobInspectionModal({ jobId, onHide, onSaved }) {
   };
 
   return (
-    <Modal show onHide={saving ? undefined : tryClose} size="xl" centered scrollable fullscreen="md-down" backdrop="static" enforceFocus={false} dialogClassName="vj-modal">
+    <>
+    <Modal show onHide={saving ? undefined : tryClose} size="xl" centered scrollable fullscreen="xl-down" backdrop="static" enforceFocus={false} dialogClassName="vj-modal">
       <style>{`
         @media (min-width: 992px) { .modal-dialog.vj-modal { --bs-modal-width: 1060px; } }
         .vj-modal { --ink: #111827; --mut: #6b7280; --line: #e5e7eb; --bg: #f4f5f7; --acc: #c8102e; }
@@ -596,6 +767,7 @@ export default function VehicleJobInspectionModal({ jobId, onHide, onSaved }) {
         .vj-modal .vj-est-row small { color: rgba(255,255,255,.55); margin-left: 6px; }
         .vj-modal .vj-est-row i { flex: 1; border-bottom: 1px dotted rgba(255,255,255,.28); transform: translateY(-4px); min-width: 12px; }
         .vj-modal .vj-est-row b { font-variant-numeric: tabular-nums; font-weight: 700; }
+        ${PA_CSS}
         .vj-modal .vj-adj { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px 24px; background: #fff; border: 1.5px solid #e5e7eb; border-radius: 16px; padding: 12px 16px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
         .vj-modal .vj-adj-main { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
         .vj-modal .vj-adj-ico { width: 38px; height: 38px; border-radius: 11px; display: inline-flex; align-items: center; justify-content: center; color: #fff; background: linear-gradient(145deg,#1f2937,#374151); flex-shrink: 0; }
@@ -653,9 +825,9 @@ export default function VehicleJobInspectionModal({ jobId, onHide, onSaved }) {
             {readOnly && <Alert variant="secondary" className="py-2">{signed ? "The head mechanic has signed this inspection. It is read-only (only an authorised user can change it)." : "You can only view this inspection now."}</Alert>}
 
             {/* Main / Sub concern */}
-            <Card title="Customer concerns" icon="mdi:message-alert-outline" color="#d97706" summary={`${data.concerns.main.length + (data.concerns.complaint ? 1 : 0)} main · ${data.concerns.sub.length} sub`}>
+            <Card title="Customer concerns" icon="mdi:message-alert-outline" color="#d97706" summary={`${data.concerns.main.length + (data.concerns.complaint ? 1 : 0)} main · ${data.concerns.sub.length + (data.concerns.remarks ? 1 : 0)} sub`}>
               <Concern title="Main Concern" list={data.concerns.main} extra={data.concerns.complaint} open={showMain} setOpen={setShowMain} />
-              <Concern title="Sub Concern" list={data.concerns.sub} open={showSub} setOpen={setShowSub} />
+              <Concern title="Sub Concern" list={data.concerns.sub} note={data.concerns.remarks} open={showSub} setOpen={setShowSub} />
             </Card>
 
             {/* Test run + faults */}
@@ -665,6 +837,7 @@ export default function VehicleJobInspectionModal({ jobId, onHide, onSaved }) {
                 { value: "NOT_NECESSARY", label: "Not Necessary", icon: "mdi:car-off", tone: "dark" },
               ]} />
             </Card>
+            {showFaults && (
             <Card anchor="faults" title="Faults" icon="mdi:alert-octagon-outline" color="#dc2626" defaultOpen done={faultsFound !== null} summary={faultsFound === true ? `${faults.filter((x) => x.trim()).length} fault(s) recorded` : faultsFound === false ? "No faults found" : "Not answered yet"}>
               <div className="mb-2">
                 <Choice value={faultsFound} onChange={setFaultsFound} disabled={readOnly} options={[
@@ -674,71 +847,91 @@ export default function VehicleJobInspectionModal({ jobId, onHide, onSaved }) {
               </div>
               {faultsFound === true && <LineList lines={faults} onChange={setFaults} disabled={readOnly} placeholder="Fault" />}
             </Card>
+            )}
 
             {/* Diagnosis */}
-            <Card title="Diagnosis" icon="mdi:stethoscope" color="#7c3aed" hint="Scanner report attached · can be shared with the other departments" summary={`${identified.filter((x) => x.trim()).length} identified fault(s) · ${data.scannerFiles.length} scanner file(s)`}
-              right={!readOnly && (
-                <>
-                  <Button size="sm" variant="outline-primary" disabled={uploading} onClick={() => fileRef.current?.click()}>
-                    {uploading ? <Spinner size="sm" /> : <Icon icon="mdi:paperclip" width="16" height="16" />} Attach scanner report
-                  </Button>
-                  <input ref={fileRef} type="file" hidden multiple accept="application/pdf,image/*,.txt,.csv" onChange={onFiles} />
-                </>
-              )}>
-              {data.scannerFiles.length === 0 ? <div className="small text-muted mb-2">No scanner report attached.</div> : (
-                <div className="d-flex flex-column gap-1 mb-2">
-                  {data.scannerFiles.map((f) => (
-                    <div key={f.id} className="d-flex align-items-center gap-2">
-                      <Icon icon="mdi:file-document-outline" width="18" height="18" />
-                      <a href={f.fileUrl} target="_blank" rel="noopener noreferrer" className="flex-grow-1 text-truncate">{f.fileName}</a>
-                      {!readOnly && <Button size="sm" variant="outline-danger" onClick={() => dropFile(f)}><Icon icon="mdi:delete-outline" width="16" height="16" /></Button>}
-                    </div>
-                  ))}
+            <Card title="Diagnosis" icon="mdi:stethoscope" color="#7c3aed" hint="Scanner report, identified faults and root cause" summary={`${identified.filter((x) => x.trim()).length} identified fault(s) · ${roots.filter((x) => x.trim()).length} root cause(s) · ${data.scannerFiles.length} scanner file(s)`}>
+              <style>{DG_CSS}</style>
+              <div className={`dg-scan ${dragOver ? "drag" : ""}`}
+                onDragOver={(e) => { if (readOnly) return; e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => { if (readOnly) return; e.preventDefault(); setDragOver(false); onFiles({ target: { files: e.dataTransfer.files, value: "" } }); }}>
+                <div className="dg-scan-h">
+                  <span className="dg-scan-ic"><Icon icon="mdi:car-wireless" width="22" height="22" /></span>
+                  <div>
+                    <div className="dg-scan-t">Scanner report</div>
+                    <div className="dg-scan-s">{data.scannerFiles.length === 0 ? "No report attached yet" : `${data.scannerFiles.length} file${data.scannerFiles.length === 1 ? "" : "s"} attached`} · shared with the other departments{!readOnly && " · drop files here"}</div>
+                  </div>
+                  {!readOnly && (
+                    <>
+                      <button type="button" className="dg-btn" disabled={uploading} onClick={() => fileRef.current?.click()}>
+                        {uploading ? <Spinner size="sm" /> : <Icon icon="mdi:paperclip" width="18" height="18" />} {uploading ? "Uploading..." : "Attach report"}
+                      </button>
+                      <input ref={fileRef} type="file" hidden multiple accept="application/pdf,image/*,.txt,.csv" onChange={onFiles} />
+                    </>
+                  )}
                 </div>
-              )}
-              <div className="fw-semibold small mb-1">Identified Faults</div>
-              <LineList lines={identified} onChange={setIdentified} disabled={readOnly} placeholder="Identified fault" />
-              <div className="fw-semibold small mt-3 mb-1">Root Cause of the vehicle issues</div>
-              <LineList lines={roots} onChange={setRoots} disabled={readOnly} placeholder="Root cause" />
-              <div className="small text-muted mt-2">Linked with Spare Parts (Stage 8) and Customer Approval (Stage 9).</div>
+                {data.scannerFiles.length > 0 && (
+                  <div className="dg-files">
+                    {data.scannerFiles.map((f) => (
+                      <div key={f.id} className="dg-file">
+                        <span className="ic"><Icon icon={fileIcon(f.fileName)} width="20" height="20" /></span>
+                        <a href={f.fileUrl} target="_blank" rel="noopener noreferrer" title={f.fileName}>{f.fileName}</a>
+                        <a href={f.fileUrl} target="_blank" rel="noopener noreferrer" aria-label="Open" style={{ flex: "none" }}><Icon icon="mdi:open-in-new" width="18" height="18" /></a>
+                        {!readOnly && <button type="button" aria-label="Remove file" onClick={() => dropFile(f)}><Icon icon="mdi:delete-outline" width="18" height="18" /></button>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="dg-grid">
+                <DiagList lines={identified} onChange={setIdentified} disabled={readOnly} placeholder="e.g. Misfire on cylinder 3" icon="mdi:alert-circle-outline" title="Identified faults" sub="What the scan / check found" />
+                <DiagList lines={roots} onChange={setRoots} disabled={readOnly} placeholder="e.g. Worn ignition coil" icon="mdi:source-branch" title="Root cause" sub="Why the vehicle has these issues" />
+              </div>
             </Card>
 
             {/* History / ERP */}
-            <Card title="Vehicle History / ERP Check" icon="mdi:history" color="#0891b2" done={previousRepair !== null || newRepair !== null || warranty !== null} summary={`${data.history.length} earlier job(s) for this vehicle`}>
-              {data.history.length > 0 ? (
-                <div className="small mb-2">
-                  <span className="text-muted">Earlier jobs of {job.regNo}: </span>
-                  {data.history.map((h) => <Badge key={h.jobNo} bg="light" text="dark" className="border me-1">{h.jobNo} · {new Date(h.createdAt).toLocaleDateString()}</Badge>)}
+            <Card title="Vehicle History / ERP Check" icon="mdi:history" color="#0891b2" done={previousRepair !== null || newRepair !== null || warranty !== null} summary={previousRepair === true ? (hist.loaded ? `${hist.total} earlier job(s) for this vehicle` : "Loading earlier jobs...") : previousRepair === false ? "Not related to a previous repair" : "Not answered yet"}>
+              <style>{HX_CSS}</style>
+              {previousRepair === true && (
+                <div className="mb-3">
+                  <div className="fw-semibold small text-muted mb-2" style={{ letterSpacing: ".04em", textTransform: "uppercase" }}>Earlier jobs of {job.regNo}{hist.loaded && hist.total > 0 ? ` · ${hist.items.length} of ${hist.total}` : ""}</div>
+                  {hist.items.length > 0 && (
+                    <div className="hx-tl">
+                      {hist.items.map((h) => (
+                        <button type="button" key={h.jobNo} className="hx-job hx-click" onClick={() => setInvoiceJobId(h.id)} title={`View the invoice of ${h.jobNo}`} aria-label={`View the invoice of ${h.jobNo}`}>
+                          <span className="ic"><Icon icon="mdi:receipt-text-outline" width="20" height="20" /></span>
+                          <span className="hx-main">
+                            <span className="hx-top"><b>{h.jobNo}</b>{h.status && <span className="hx-st">{String(h.status).replace(/_/g, " ")}</span>}</span>
+                            <small>{new Date(h.createdAt).toLocaleDateString()}</small>
+                          </span>
+                          <span className="hx-go"><span className="hx-go-t">Invoice</span><Icon icon="mdi:chevron-right" width="20" height="20" /></span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {hist.loaded && !hist.loading && !hist.failed && hist.items.length === 0 && <div className="hx-empty"><Icon icon="mdi:history" width="20" height="20" /> No earlier jobs for this vehicle.</div>}
+                  {hist.failed && <div className="hx-empty"><Icon icon="mdi:alert-circle-outline" width="20" height="20" /> Could not load the earlier jobs.</div>}
+                  {(hist.loading || hist.hasMore || hist.failed) && (
+                    <button type="button" className="dg-add mt-2" disabled={hist.loading} onClick={moreHistory}>
+                      {hist.loading ? <Spinner size="sm" /> : <Icon icon="mdi:history" width="18" height="18" />} {hist.loading ? "Loading..." : hist.failed ? "Try again" : "Show previous jobs"}
+                    </button>
+                  )}
                 </div>
-              ) : <div className="small text-muted mb-2">No earlier jobs for this vehicle.</div>}
-              <Row className="g-2 align-items-center">
-                <Col xs={8}>Related to a previous repair?</Col><Col xs={4}><YesNo value={previousRepair} onChange={setPreviousRepair} disabled={readOnly} /></Col>
-                <Col xs={8}>New repair?</Col><Col xs={4}><YesNo value={newRepair} onChange={setNewRepair} disabled={readOnly} /></Col>
-                <Col xs={8}>Warranty available?</Col><Col xs={4}><YesNo value={warranty} onChange={setWarranty} disabled={readOnly} /></Col>
-              </Row>
-              <FormControl as="textarea" rows={2} maxLength={2000} className="mt-2" placeholder="Remarks (optional)" value={historyRemarks} disabled={readOnly} onChange={(e) => setHistoryRemarks(e.target.value)} />
+              )}
+              <div className="hx-qs">
+                <HxQuestion icon="mdi:link-variant" title="Related to a previous repair?" sub="This problem comes from an earlier job" value={previousRepair} onChange={setPreviousRepair} disabled={readOnly} />
+                <HxQuestion icon="mdi:wrench-outline" title="New repair?" sub="A fresh problem, not a repeat" value={newRepair} onChange={setNewRepair} disabled={readOnly} />
+                <HxQuestion icon="mdi:shield-check-outline" title="Warranty available?" sub="Warranty claim lines are not charged" value={warranty} onChange={setWarranty} disabled={readOnly} />
+              </div>
+              <div className="hx-note">
+                <label><Icon icon="mdi:text-box-outline" width="16" height="16" /> Remarks <span className="text-muted fw-normal">(optional)</span></label>
+                <textarea rows={2} maxLength={2000} placeholder="Anything the ERP check showed about this vehicle's history" value={historyRemarks} disabled={readOnly} onChange={(e) => setHistoryRemarks(e.target.value)} />
+              </div>
             </Card>
 
             {/* Repair types */}
             <Card title="Select type of repair" icon="mdi:wrench-cog-outline" color="#ea580c" defaultOpen done={tickedCount > 0} summary={`${shownGroups.length} type(s) · ${tickedCount} child type(s) ticked`} hint={shownGroups.length ? "The types from the complaint are selected for you. Tick the child types that apply: each one is added to the Repair list with its price." : undefined}>
-              <div className="vj-adj">
-                <div className="vj-adj-main">
-                  <span className="vj-adj-ico"><Icon icon="mdi:percent" width="20" height="20" /></span>
-                  <div>
-                    <div className="vj-adj-t">Price adjustment</div>
-                    <div className="vj-adj-s">Added to the price of every spare part and repair item</div>
-                  </div>
-                  <select id="vj-markup" aria-label="Price adjustment" className="form-select" value={pct} disabled={readOnly || savingMarkup} onChange={(e) => changeMarkup(Number(e.target.value))}>
-                    <option value={0}>None</option>
-                    {[2, 5, 8, 10, 12].map((p) => <option key={p} value={p}>+ {p}%</option>)}
-                  </select>
-                  {savingMarkup && <Spinner size="sm" />}
-                </div>
-                <div className={`vj-adj-sw ${pct === 0 ? "off" : ""}`}>
-                  <Form.Check type="switch" id="vj-showadj" label="Show price breakdown" checked={showAdj && pct > 0} disabled={pct === 0} onChange={(e) => setShowAdj(e.target.checked)} />
-                  <div className="vj-adj-s">{pct === 0 ? "Choose a percentage first." : "Shows the actual price and the increase under each price."}</div>
-                </div>
-              </div>
               {shownGroups.length > 0 ? (
                 shownGroups.map((g) => (
                   <div key={g.parent} className="border rounded-3 mb-2 overflow-hidden">
@@ -860,7 +1053,6 @@ export default function VehicleJobInspectionModal({ jobId, onHide, onSaved }) {
                         </td>
                         <td className="text-nowrap text-end">
                           {!readOnly && (<>
-                            <Button size="sm" variant="outline-primary" title="Alternate" onClick={() => { setEditId(r.id); setEdit({ description: r.description, qty: String(r.qty || 1), amount: String(r.unitPrice ?? r.amount), repairType: r.repairType || "" }); }}><Icon icon="mdi:swap-horizontal" width="16" height="16" /></Button>{" "}
                             <Button size="sm" variant="outline-danger" title="Remove" onClick={() => remove(r)}><Icon icon="mdi:delete-outline" width="16" height="16" /></Button>
                           </>)}
                         </td>
@@ -887,6 +1079,9 @@ export default function VehicleJobInspectionModal({ jobId, onHide, onSaved }) {
                   <Col md={2} className="d-grid"><Button size="sm" variant="primary" disabled={addingItem} onClick={add}><Icon icon="mdi:plus" width="16" height="16" /> Add</Button></Col>
                 </Row>
               )}
+              <PriceAdjust title="Price adjustment · Repair" sub="Added to the unit price of every repair item above. Spare parts have their own adjustment."
+                value={String(pct)} options={pctOptions.map((p) => ({ value: String(p), label: p === 0 ? "None" : `+${p}%` }))} onChange={(v) => changeMarkup(Number(v))}
+                disabled={readOnly || savingMarkup} busy={savingMarkup} base={repairBase} final={repairGross} pctNow={pct} showAdj={showAdj} onShowAdj={setShowAdj} switchId="pa-show-repair" empty={active.length === 0} />
               {old.length > 0 && (
                 <div className="mt-2">
                   <Button size="sm" variant="link" className="p-0" onClick={() => setShowOld(!showOld)}>{showOld ? "Hide" : "Show"} removed / replaced items ({old.length})</Button>
@@ -901,7 +1096,14 @@ export default function VehicleJobInspectionModal({ jobId, onHide, onSaved }) {
 
             {/* Signature */}
             {/* Spare parts (Spare Part Review & Order is part of this window) */}
-            <div data-vj="spare"><SparePartsSections jobId={jobId} readOnly={readOnly} markupPercent={pct} showAdjDetails={showAdj} warrantyOn={wOn} /></div>
+            <div data-vj="spare"><SparePartsSections jobId={jobId} readOnly={readOnly} markupPercent={sparePct} showAdjDetails={showAdjSpare} warrantyOn={wOn}
+              adjustment={(
+                <PriceAdjust title="Price adjustment · Spare parts" sub={`Added to every spare part and quotation${data?.sparePercentSame ? " · now the same as the repair adjustment" : ""}`}
+                  value={data?.sparePercentSame ? "same" : String(sparePct)}
+                  options={[{ value: "same", label: `Same as repair (${pct === 0 ? "None" : `+${pct}%`})` }, ...sparePctOptions.map((p) => ({ value: String(p), label: p === 0 ? "None" : `+${p}%` }))]}
+                  onChange={(v) => changeSpareMarkup(v)} disabled={readOnly || savingSpareMarkup} busy={savingSpareMarkup} base={spareBase} final={spareGross} pctNow={sparePct}
+                  showAdj={showAdjSpare} onShowAdj={setShowAdjSpare} switchId="pa-show-spare" empty={!spData || ((spData.items || []).length + (spData.quotes || []).length) === 0} />
+              )} /></div>
 
             <Card anchor="sign" title="Signature of Head mechanic" icon="mdi:draw" color="#d97706" done={signed} summary={signed ? `Signed by ${data.inspection.signedByName}` : "Not signed yet"} hint={signed ? "Signed" : "Select the head mechanic, draw the signature and press Sign & complete."}>
               <div className="mb-2"><EmployeePicker value={signer} onChange={setSigner} employees={people} disabled={readOnly || signed} /></div>
@@ -928,5 +1130,7 @@ export default function VehicleJobInspectionModal({ jobId, onHide, onSaved }) {
         )}
       </Modal.Footer>
     </Modal>
+      {invoiceJobId && <InvoiceModal key={`inv${invoiceJobId}`} jobId={invoiceJobId} onHide={() => setInvoiceJobId(null)} />}
+    </>
   );
 }

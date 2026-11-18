@@ -59,7 +59,7 @@ function ItemSearch({ onAdd, disabled }) {
       </div>
       {typed && (
         <div className="border rounded-3 mt-1 bg-white overflow-hidden shadow-sm" style={{ maxHeight: 300, overflowY: "auto" }}>
-          {!isFetching && data.length === 0 && <div className="small text-muted p-3">No spare part found for &apos;{dq}&apos;. Add it to the Item master (Inventory &amp; Spare Parts), or add it manually below.</div>}
+          {!isFetching && data.length === 0 && <div className="small text-muted p-3">No spare part found for "{dq}". Add it to the Item master (Inventory &amp; Spare Parts), or add it manually below.</div>}
           {data.map((p) => (
             <button key={p.id} type="button" disabled={disabled} onClick={() => pick(p)} className={`d-flex align-items-center gap-2 w-100 text-start border-0 border-bottom px-3 py-2 ${added === p.id ? "bg-success-subtle" : "bg-white"}`}>
               <div className="flex-grow-1">
@@ -199,18 +199,16 @@ export default function SparePartsModal({ jobId, onHide, onSaved }) {
     try { await addQuote({ jobId, photoUrl: quote.photoUrl || undefined, description: quote.description.trim() }).unwrap(); setQuote({ description: "", photoUrl: "", photoName: "" }); } catch (ex) { fail(ex, "Could not add the request."); }
   };
 
-  // "Upload to ERP System" + link to the Logistic and Stock department
+  // "Upload to ERP System" + link to the Inventory & Spare Parts
   const send = async () => {
     try {
-      const r = await sendLink(jobId).unwrap();
-      const url = `${window.location.origin}${r.path}`;
-      try { await navigator.clipboard.writeText(url); } catch (_) { /* clipboard may be blocked */ }
+      await sendLink(jobId).unwrap();
       await Swal.fire({
-        title: "Sent to Logistic & Stock",
-        html: `<div style="word-break:break-all;font-size:.9rem">${esc(url)}</div><div class="text-muted mt-2" style="font-size:.8rem">The link is copied. ${r.sms?.sent ? "It was also sent by SMS." : r.sms ? `SMS not sent: ${esc(r.sms.error)}` : "Share it with the Logistic &amp; Stock department."}</div>`,
+        title: "Sent to Inventory & Spare Parts",
+        html: `<div class="text-muted" style="font-size:.9rem">The spare parts and the quotation requests are now in <strong>Inventory &amp; Spare Parts &rarr; Job Orders &rarr; Spare part orders</strong>.</div>`,
         icon: "success",
       });
-    } catch (ex) { fail(ex, "Could not create the link."); }
+    } catch (ex) { fail(ex, "Could not upload to the ERP."); }
   };
 
   const finish = async () => {
@@ -397,7 +395,7 @@ var im=document.images[0];if(!im||im.complete){setTimeout(go,150)}else{im.onload
                       </Button>
                     </div>
                     <ItemSearch onAdd={addFromCatalog} disabled={adding} />
-                    <div className="small text-muted mt-n2">Search the item master and click an item to add it. Can&apos;t find it? Use &apos;Add item manually&apos;.</div>
+                    <div className="small text-muted mt-n2">Search the item master and click an item to add it. Can't find it? Use "Add item manually".</div>
                   </div>
                 )}
                 <Table size="sm" responsive className="align-middle mb-2">
@@ -437,7 +435,7 @@ var im=document.images[0];if(!im||im.complete){setTimeout(go,150)}else{im.onload
               </Card>
 
               {/* Third-party quotation */}
-              <Card title="Request quotation from third parties" icon="mdi:storefront-outline" color="#0891b2" done={data.quotes.length > 0} summary={`${data.quotes.length} request(s)`} hint="Item photo + description. It is uploaded to the ERP and the Logistic & Stock department gets a link to answer with a price.">
+              <Card title="Request quotation from third parties" icon="mdi:storefront-outline" color="#0891b2" done={data.quotes.length > 0} summary={`${data.quotes.length} request(s)`} hint="Item photo + description. It is uploaded to the ERP and Inventory & Spare Parts is notified to answer with a price.">
                 {!readOnly && (
                   <div className="row g-2 align-items-start mb-2">
                     <div className="col-md-4 d-flex align-items-center gap-2">
@@ -459,11 +457,11 @@ var im=document.images[0];if(!im||im.complete){setTimeout(go,150)}else{im.onload
                 {(data.items.length > 0 || data.quotes.length > 0) && (
                 <div className="border-top mt-3 pt-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
                   <div>
-                    <div className="small text-muted">{data.header.logisticsUpdatedAt ? `Logistic & Stock updated ${new Date(data.header.logisticsUpdatedAt).toLocaleString()} · the list above shows their prices` : data.header.linkSentAt ? `Link sent ${new Date(data.header.linkSentAt).toLocaleString()} · waiting for Logistic & Stock to update` : "Not sent to Logistic & Stock yet"}</div>
+                    <div className="small text-muted">{data.header.logisticsUpdatedAt ? `Logistic & Stock updated ${new Date(data.header.logisticsUpdatedAt).toLocaleString()} · the list above shows their prices` : data.header.linkSentAt ? `Uploaded to Inventory ${new Date(data.header.linkSentAt).toLocaleString()} · waiting for Inventory & Spare Parts to update` : "Not uploaded to Inventory & Spare Parts yet"}</div>
                   </div>
                   <div className="d-flex gap-2">
                     <Button size="sm" variant="outline-secondary" disabled={isFetching} onClick={refetch}><Icon icon="mdi:refresh" width="16" height="16" /> Refresh</Button>
-                    {!readOnly && <Button size="sm" variant="primary" disabled={linking} onClick={send}><Icon icon="mdi:send-outline" width="16" height="16" /> Upload to ERP &amp; send link</Button>}
+                    {!readOnly && <Button size="sm" variant="primary" disabled={linking || !data.header.needsUpload} onClick={send}><Icon icon={data.header.needsUpload ? "mdi:send-outline" : "mdi:check-circle-outline"} width="16" height="16" /> {data.header.needsUpload ? "Upload to ERP System" : "Uploaded"}</Button>}
                   </div>
                 </div>
                 )}

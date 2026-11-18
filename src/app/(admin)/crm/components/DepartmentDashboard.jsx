@@ -868,10 +868,13 @@ export default function DepartmentDashboard({ department }) {
       {washTeamJobId && <WashTeamInspectionModal key={`tc${washTeamJobId}`} jobId={washTeamJobId} onHide={() => setWashTeamJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted && dcDept?.hasDryingCheck) setDryJobId(jobId); }} />}
       {dryJobId && <WashDryingAreaModal key={`dc${dryJobId}`} jobId={dryJobId} onHide={() => setDryJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted && icDept?.hasInternalCheck) setIntJobId(jobId); }} />}
       {intJobId && <WashInternalInspectionModal key={`ic${intJobId}`} jobId={intJobId} onHide={() => setIntJobId(null)} onSaved={({ jobId, stageCompleted }) => { if (stageCompleted && evDept?.hasDeptTransfer) setTransferJobId(jobId); }} />}
+      {complaintJobId && (
       <ComplaintModal
+        key={`cm${complaintJobId}`}
         jobId={complaintJobId}
         startNow={complaintStartNow}
         onSaved={({ jobId, stageCompleted, started }) => {
+          setComplaintJobId(null); setComplaintStartNow(false);   // make sure the Concern window is gone before the next stage window opens
           // Wash: the job has just been started -> the Vehicle Damages Report window opens by itself
           if (started && drDept?.hasDamageReport) { setReportJobId(jobId); return; }
           // Complaint recording finished -> Team Allocation starts (departments with teams only)
@@ -886,6 +889,7 @@ export default function DepartmentDashboard({ department }) {
           setComplaintStartNow(false);
         }}
       />
+      )}
     </div>
   );
 }

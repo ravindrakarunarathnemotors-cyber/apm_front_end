@@ -441,7 +441,20 @@ function DryingForm({ data, onHide, onSaved }) {
         .jc-label { font-weight: 600; color: #111; flex: 1; }
         .dc-fluid { border: 1.5px solid #e3e3e6; border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; background: #fafafa; }
         .dc-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
-        @media (max-width: 767px) { .dc-grid { grid-template-columns: repeat(2, 1fr); } }
+        /* tablet: 3 per row, phone: 2 per row; the last cell (price) always takes the rest of its row */
+        .dc-cell { min-width: 0; }
+        .dc-cell .form-select { min-width: 0; }
+        @media (max-width: 991.98px) { .dc-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .dc-grid .dc-cell:last-child { grid-column: span 2; } }
+        @media (max-width: 575.98px) {
+          .dc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          .dc-fluid { padding: 10px; }
+          .dc-yn { width: 100%; }
+          .dc-yn button { flex: 1; padding: 0 10px; justify-content: center; }
+          .dc-tabs button { flex: 1 1 100%; justify-content: center; }
+          .dc-fluid .dc-price { min-width: 0 !important; width: 100%; }
+          .dc-part { flex-wrap: wrap; }
+          .dc-part > .flex-grow-1 { flex: 1 1 100%; }
+        }
         .dc-lbl { display: block; font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #6b7280; margin-bottom: 3px; }
         .dc-price { min-height: 46px; display: flex; align-items: center; justify-content: center; border-radius: 12px; background: #111; color: #fff; font-weight: 800; box-shadow: inset 0 -3px 0 #c8102e; padding: 0 12px; white-space: nowrap; }
         .dc-yn { display: flex; gap: 8px; }
@@ -562,7 +575,7 @@ function DryingForm({ data, onHide, onSaved }) {
 export default function WashDryingAreaModal({ jobId, onHide, onSaved }) {
   const { data, isLoading, isError, error, refetch } = useGetDryingCheckQuery(jobId, { skip: !jobId, refetchOnMountOrArgChange: true });
   return (
-    <Modal show={Boolean(jobId)} onHide={onHide} size="xl" fullscreen="md-down" scrollable centered backdrop="static" dialogClassName="cm-modal">
+    <Modal show={Boolean(jobId)} onHide={onHide} size="xl" fullscreen="xl-down" scrollable centered backdrop="static" dialogClassName="cm-modal">
       <style>{`
         @media (min-width: 992px) { .modal-dialog.cm-modal { --bs-modal-width: 860px; } }
         .cm-modal .modal-content { border: 0; border-radius: 18px; overflow: hidden; box-shadow: 0 24px 60px -18px rgba(0,0,0,.6); }

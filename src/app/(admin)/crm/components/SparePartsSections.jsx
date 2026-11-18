@@ -60,7 +60,7 @@ function ItemSearch({ onAdd, disabled }) {
       </div>
       {typed && (
         <div className="border rounded-3 mt-1 bg-white overflow-hidden shadow-sm" style={{ maxHeight: 300, overflowY: "auto" }}>
-          {!isFetching && data.length === 0 && <div className="small text-muted p-3">No spare part found for &apos;{dq}&apos;. Add it to the Item master (Inventory &amp; Spare Parts), or add it manually below.</div>}
+          {!isFetching && data.length === 0 && <div className="small text-muted p-3">No spare part found for "{dq}". Add it to the Item master (Inventory &amp; Spare Parts), or add it manually below.</div>}
           {data.map((p) => (
             <button key={p.id} type="button" disabled={disabled} onClick={() => pick(p)} className={`d-flex align-items-center gap-2 w-100 text-start border-0 border-bottom px-3 py-2 ${added === p.id ? "bg-success-subtle" : "bg-white"}`}>
               <div className="flex-grow-1">
@@ -129,7 +129,7 @@ function ClaimPill({ on, disabled, onChange }) {
 
 // The spare part sections (Spare Parts Requirement, Request quotation from third parties),
 // used inside the Vehicle Job Inspection window so that there is no separate Spare Part Review & Order window.
-export default function SparePartsSections({ jobId, readOnly: lockedByParent, markupPercent = 0, showAdjDetails = false, warrantyOn = false }) {
+export default function SparePartsSections({ jobId, readOnly: lockedByParent, markupPercent = 0, showAdjDetails = false, warrantyOn = false, adjustment = null }) {
   // price adjustment (markup %) of the job: added to the unit price of EACH part / quotation line
   const pct = Number(markupPercent) || 0;
   // the % is added to the UNIT PRICE of each line, so the line total = qty x (unit price + %)
@@ -212,31 +212,60 @@ export default function SparePartsSections({ jobId, readOnly: lockedByParent, ma
     try { await addQuote({ jobId, photoUrl: quote.photoUrl || undefined, description: quote.description.trim() }).unwrap(); setQuote({ description: "", photoUrl: "", photoName: "" }); } catch (ex) { fail(ex, "Could not add the request."); }
   };
 
-  // "Upload to ERP System" + link to the Logistic and Stock department
+  // a quotation request can be removed at any stage; one that Inventory already has (or has quoted) asks first
+  const dropQuote = async (q) => {
+    if (q.status !== "REQUESTED") {
+      const ok = await Swal.fire({ title: "Remove this request?", text: q.status === "QUOTED" ? "Inventory & Spare Parts already quoted this item. It will be removed from the job and from their list." : "It was already sent to Logistic & Stock. It will be removed from the job and from their list.", icon: "warning", showCancelButton: true, confirmButtonText: "Yes, remove", confirmButtonColor: "#111" });
+      if (!ok.isConfirmed) return;
+    }
+    try { await removeQuote({ jobId, quoteId: q.id }).unwrap(); } catch (ex) { fail(ex, "Could not remove the request."); }
+  };
+
+  // "Upload to ERP System" + link to the Inventory & Spare Parts
   const send = async () => {
     try {
-      const r = await sendLink(jobId).unwrap();
-      const url = `${window.location.origin}${r.path}`;
-      try { await navigator.clipboard.writeText(url); } catch (_) { /* clipboard may be blocked */ }
+      await sendLink(jobId).unwrap();
       await Swal.fire({
-        title: "Sent to Logistic & Stock",
-        html: `<div style="word-break:break-all;font-size:.9rem">${esc(url)}</div><div class="text-muted mt-2" style="font-size:.8rem">The link is copied. ${r.sms?.sent ? "It was also sent by SMS." : r.sms ? `SMS not sent: ${esc(r.sms.error)}` : "Share it with the Logistic &amp; Stock department."}</div>`,
+        title: "Sent to Inventory & Spare Parts",
+        html: `<div class="text-muted" style="font-size:.9rem">The spare parts and the quotation requests are now in <strong>Inventory &amp; Spare Parts &rarr; Job Orders &rarr; Spare part orders</strong>.</div>`,
         icon: "success",
       });
-    } catch (ex) { fail(ex, "Could not create the link."); }
+    } catch (ex) { fail(ex, "Could not upload to the ERP."); }
   };
 
   const partsGross = data ? data.items.filter((i) => !claimed(i)).reduce((sum, i) => sum + numOf(i, "qty") * adjUnit(numOf(i, "unitPrice")), 0) : 0;
   if (isLoading) return <div className="text-center py-3"><Spinner size="sm" /></div>;
   if (isError || !data) return null; // department without spare parts
+  // "No spare parts needed": the add-part form, the list, the quotation requests and the send bar are hidden - only this switch stays
+  const noneNeeded = Boolean(data.header.noParts) && data.items.length === 0 && data.quotes.length === 0;
+  if (noneNeeded) {
+    return (
+      <Card title="Spare Parts Requirement" icon="mdi:cog-transfer-outline" color="#ea580c" done summary="No spare parts needed for this job">
+        <div className="d-flex flex-wrap align-items-center gap-3 rounded-3 p-3" style={{ background: "#e8f8ee", border: "1.5px solid #16a34a" }}>
+          <Icon icon="mdi:check-circle" width="32" height="32" style={{ color: "#16a34a", flexShrink: 0 }} />
+          <div className="flex-grow-1" style={{ minWidth: 200 }}>
+            <div className="fw-bold fs-6">No spare parts needed for this job</div>
+            <div className="small text-muted">Nothing to add or send to Inventory.</div>
+          </div>
+          {!readOnly && <Button variant="outline-dark" className="fw-semibold" onClick={() => setHeader({ jobId, noParts: false })}><Icon icon="mdi:plus-circle-outline" width="18" height="18" /> Add spare parts</Button>}
+        </div>
+      </Card>
+    );
+  }
   return (
     <>
               {/* Requirement list */}
               <Card title="Spare Parts Requirement" icon="mdi:cog-transfer-outline" color="#ea580c" done={data.items.length > 0} summary={`${data.items.length} part(s) · ${money(partsGross)}${pct > 0 ? ` (incl. +${pct}%)` : ""}`} hint="Search the item master and click a part to add it. If the stock is not available, update the price manually."
                 right={<span className="badge text-bg-dark fs-6 fw-semibold">{money(partsGross)}</span>}>
                 {data.items.length === 0 && (
-                  <Form.Check type="checkbox" id="sp-noparts" className="mb-3 fw-semibold" disabled={readOnly} checked={Boolean(data.header.noParts)}
-                    label="No spare parts needed for this job" onChange={(e) => setHeader({ jobId, noParts: e.target.checked })} />
+                  <>
+                  {!readOnly && (
+                    <Button variant="outline-dark" className="w-100 mb-3 py-2 fw-semibold d-flex align-items-center justify-content-center gap-2" style={{ borderWidth: 1.5, borderRadius: 12 }} onClick={() => setHeader({ jobId, noParts: true })}>
+                      <Icon icon="mdi:package-variant-closed-remove" width="22" height="22" /> No spare parts needed for this job
+                    </Button>
+                  )}
+                  {readOnly && Boolean(data.header.noParts) && <div className="mb-3 fw-semibold"><Icon icon="mdi:check-circle" width="20" height="20" style={{ color: "#16a34a" }} /> No spare parts needed for this job</div>}
+                  </>
                 )}
                 {!readOnly && (
                   <div className="rounded-3 p-3 mb-3" style={{ background: "#f4f5f7", border: "1px solid #e5e7eb" }}>
@@ -247,7 +276,7 @@ export default function SparePartsSections({ jobId, readOnly: lockedByParent, ma
                       </Button>
                     </div>
                     <ItemSearch onAdd={addFromCatalog} disabled={adding} />
-                    <div className="small text-muted mt-n2">Search the item master and click an item to add it. Can&apos;t find it? Use &apos;Add item manually&apos;.</div>
+                    <div className="small text-muted mt-n2">Search the item master and click an item to add it. Can't find it? Use "Add item manually".</div>
                   </div>
                 )}
                 <Table size="sm" responsive className="align-middle mb-2">
@@ -287,6 +316,7 @@ export default function SparePartsSections({ jobId, readOnly: lockedByParent, ma
                     </tfoot>
                   )}
                 </Table>
+                {adjustment}
                 {!readOnly && showManual && (
                   <div className="border rounded p-2 bg-light">
                     <div className="small fw-semibold mb-1">Add / update manually</div>
@@ -303,7 +333,7 @@ export default function SparePartsSections({ jobId, readOnly: lockedByParent, ma
               </Card>
 
               {/* Third-party quotation */}
-              <Card title="Request quotation from third parties" icon="mdi:storefront-outline" color="#0891b2" done={data.quotes.length > 0} summary={`${data.quotes.length} request(s)`} hint="Item photo + description. It is uploaded to the ERP and the Logistic & Stock department gets a link to answer with a price.">
+              <Card title="Request quotation from third parties" icon="mdi:storefront-outline" color="#0891b2" done={data.quotes.length > 0} summary={`${data.quotes.length} request(s)`} hint="Item photo + description. It is uploaded to the ERP and Inventory & Spare Parts is notified to answer with a price.">
                 {!readOnly && (
                   <div className="row g-2 align-items-start mb-2">
                     <div className="col-md-4 d-flex align-items-center gap-2">
@@ -319,21 +349,35 @@ export default function SparePartsSections({ jobId, readOnly: lockedByParent, ma
                   <div key={q.id} className="d-flex align-items-center gap-2 border-top py-1">
                     {q.photoUrl ? <a href={q.photoUrl} target="_blank" rel="noopener noreferrer"><img src={q.photoUrl} alt="" style={{ height: 40, width: 40, objectFit: "cover", borderRadius: 4 }} /></a> : <Icon icon="mdi:image-off-outline" width="28" height="28" className="text-muted" />}
                     <div className="flex-grow-1">{q.description}<div className="small"><Badge bg={QUOTE_BADGE[q.status][0]}>{QUOTE_BADGE[q.status][1]}</Badge>{q.quotedPrice != null && <strong className="ms-2">{money(q.quotedPrice)}</strong>}{q.quotedNote && <span className="text-muted ms-2">{q.quotedNote}</span>}</div></div>
-                    {!readOnly && q.status === "REQUESTED" && <Button size="sm" variant="outline-danger" onClick={() => removeQuote({ jobId, quoteId: q.id })}><Icon icon="mdi:delete-outline" width="16" height="16" /></Button>}
+                    {!readOnly && <Button size="sm" variant="outline-danger" title="Remove this request" aria-label="Remove this request" onClick={() => dropQuote(q)}><Icon icon="mdi:delete-outline" width="16" height="16" /></Button>}
                   </div>
                 ))}
-                {(data.items.length > 0 || data.quotes.length > 0) && (
-                <div className="border-top mt-3 pt-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
-                  <div>
-                    <div className="small text-muted">{data.header.logisticsUpdatedAt ? `Logistic & Stock updated ${new Date(data.header.logisticsUpdatedAt).toLocaleString()} · the list above shows their prices` : data.header.linkSentAt ? `Link sent ${new Date(data.header.linkSentAt).toLocaleString()} · waiting for Logistic & Stock to update` : "Not sent to Logistic & Stock yet"}</div>
+              </Card>
+
+              {/* ONE send for both lists: the spare parts above and the third-party quotation requests */}
+              {(data.items.length > 0 || data.quotes.length > 0) && (
+                <div data-vj="spare-send" className={`sp-send ${data.header.needsUpload ? "todo" : "done"}`}>
+                  <span className="sp-send-ic"><Icon icon={data.header.needsUpload ? "mdi:package-up" : "mdi:check-decagram-outline"} width="24" height="24" /></span>
+                  <div className="sp-send-t">
+                    <b>{data.header.needsUpload ? "Send to Inventory & Spare Parts" : "Sent to Inventory & Spare Parts"}</b>
+                    <div className="sp-send-chips"><span>{data.items.length} spare part{data.items.length === 1 ? "" : "s"}</span><span>{data.quotes.length} quotation request{data.quotes.length === 1 ? "" : "s"}</span></div>
+                    <small>{data.header.logisticsUpdatedAt ? `Logistic & Stock updated ${new Date(data.header.logisticsUpdatedAt).toLocaleString()} · the lists above show their prices` : data.header.linkSentAt ? `Sent ${new Date(data.header.linkSentAt).toLocaleString()}${data.header.needsUpload ? " · you changed the lists since, send again" : " · waiting for Inventory & Spare Parts to update"}` : "Both lists go together in one send. Not sent yet."}</small>
                   </div>
-                  <div className="d-flex gap-2">
+                  <div className="sp-send-a">
                     <Button size="sm" variant="outline-secondary" disabled={isFetching} onClick={refetch}><Icon icon="mdi:refresh" width="16" height="16" /> Refresh</Button>
-                    {!readOnly && <Button size="sm" variant="primary" disabled={linking} onClick={send}><Icon icon="mdi:send-outline" width="16" height="16" /> Upload to ERP &amp; send link</Button>}
+                    {!readOnly && <Button variant="dark" disabled={linking || !data.header.needsUpload} onClick={send}>{linking ? <Spinner size="sm" /> : <Icon icon={data.header.needsUpload ? "mdi:send-outline" : "mdi:check-circle-outline"} width="18" height="18" />} {data.header.needsUpload ? "Send both lists" : "Sent"}</Button>}
                   </div>
                 </div>
-                )}
-              </Card>
+              )}
+              <style>{`
+                .sp-send { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 14px; padding: 14px 16px; border-radius: 16px; border: 1.5px solid #111827; background: #fff; }
+                .sp-send.done { border-color: #d6d9de; background: #f8fafc; }
+                .sp-send-ic { width: 46px; height: 46px; border-radius: 13px; display: grid; place-items: center; background: #111827; color: #fff; flex: none; } .sp-send.done .sp-send-ic { background: #e5e7eb; color: #111827; }
+                .sp-send-t { flex: 1 1 260px; min-width: 0; } .sp-send-t b { display: block; color: #111827; line-height: 1.25; } .sp-send-t small { display: block; color: #6b7280; line-height: 1.3; margin-top: 4px; }
+                .sp-send-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; } .sp-send-chips span { background: #f1f5f9; border-radius: 999px; padding: 2px 10px; font-size: .78rem; font-weight: 600; color: #334155; }
+                .sp-send-a { display: flex; gap: 8px; flex-wrap: wrap; }
+                @media (max-width: 575px) { .sp-send-a { width: 100%; } .sp-send-a .btn { flex: 1; } }
+              `}</style>
 
     </>
   );

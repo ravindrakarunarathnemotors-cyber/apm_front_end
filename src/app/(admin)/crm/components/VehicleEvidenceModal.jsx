@@ -192,6 +192,8 @@ export default function VehicleEvidenceModal({ jobId, onHide, onSaved, preDepart
   const [damages, setDamages] = useState([""]);
   const [more, setMore] = useState("");
   const [touched, setTouched] = useState(false);
+  const [flashProp, setFlashProp] = useState(false);   // red highlight on the question after the alert
+  const propRef = useRef(null);   // the "property inside the vehicle?" question
   const [serverError, setServerError] = useState("");
   const [managing, setManaging] = useState(false);
   const [propertyInside, setPropertyInside] = useState(null); // stage 4: customer property inside the vehicle? true / false / null (not answered)
@@ -270,6 +272,13 @@ export default function VehicleEvidenceModal({ jobId, onHide, onSaved, preDepart
     setServerError("");
     if (hasErrors) return;
     if (preDepartment) {
+      if (propertyInside === null) {   // must be answered before saving / moving on
+        await Swal.fire({ title: "Answer this question", text: "Select Yes or No: is there any property inside the vehicle?", icon: "warning", confirmButtonText: "OK" });
+        const box = propRef.current;
+        if (box) { box.scrollIntoView({ behavior: "smooth", block: "center" }); box.querySelector("button")?.focus({ preventScroll: true }); }   // focus the Yes button
+        setFlashProp(true); setTimeout(() => setFlashProp(false), 3000);
+        return;
+      }
       // stage 4: only the ticks of the reminder checklist are saved (photos / videos are saved as they are uploaded)
       try {
         const pr = await savePre({ jobId, propertyInside, remark: more.trim() }).unwrap();
@@ -456,7 +465,7 @@ export default function VehicleEvidenceModal({ jobId, onHide, onSaved, preDepart
         .ve-modal .ve-plate { display: inline-flex; background: #facc15; color: #111; border: 1.5px solid #111; border-radius: 6px; padding: 1px 9px; font-weight: 800; font-size: .82rem; letter-spacing: .05em; }
         .ve-modal .ve-jobno { display: inline-block; background: #111; color: #fff; border-radius: 8px; padding: 3px 10px; font-weight: 700; font-size: .82rem; box-shadow: inset 3px 0 0 #c8102e; }
       `}</style>
-      <Modal show onHide={saving ? undefined : onHide} centered scrollable fullscreen="md-down" backdrop="static" enforceFocus={!managing && !preview} dialogClassName="ve-modal">
+      <Modal show onHide={saving ? undefined : onHide} centered scrollable fullscreen="xl-down" backdrop="static" enforceFocus={!managing && !preview} dialogClassName="ve-modal">
         <Modal.Header closeButton={!saving} closeVariant="white" className="ve-head">
           <Modal.Title className="fs-5 d-flex align-items-center gap-2 text-white">
             <Icon icon="mdi:car-search-outline" width="28" height="28" />
@@ -495,24 +504,24 @@ export default function VehicleEvidenceModal({ jobId, onHide, onSaved, preDepart
                   </div>
 
                   {preDepartment && (
-                    <div className={`bg-white border rounded-3 p-2 px-3 mb-2 ${propertyInside === true ? "border-warning" : ""}`}>
+                    <div ref={propRef} style={flashProp && propertyInside === null ? { border: "2px solid #dc3545", boxShadow: "0 0 0 4px rgba(220,53,69,.25)", transition: "box-shadow .2s" } : undefined} className={`bg-white border rounded-3 p-2 px-3 mb-2 ${propertyInside === true ? "border-warning" : touched && propertyInside === null ? "border-danger" : ""}`}>
                       <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
                         <div>
                           <div className="fw-bold">Ask the customer</div>
-                          <div className="text-muted">Is there any property inside the vehicle?</div>
+                          <div className="text-muted">Is there any property inside the vehicle? <span className="text-danger">*</span></div>
                         </div>
                         <div className="btn-group" role="group" aria-label="Property inside the vehicle">
-                          <Button variant={propertyInside === true ? "warning" : "outline-secondary"} disabled={readOnly} onClick={() => setPropertyInside(true)}>
+                          <Button variant={propertyInside === true ? "warning" : "outline-secondary"} disabled={readOnly} onClick={() => { setPropertyInside(true); setFlashProp(false); }}>
                             <Icon icon="mdi:bag-personal-outline" width="18" height="18" /> Yes
                           </Button>
-                          <Button variant={propertyInside === false ? "success" : "outline-secondary"} disabled={readOnly} onClick={() => setPropertyInside(false)}>
+                          <Button variant={propertyInside === false ? "success" : "outline-secondary"} disabled={readOnly} onClick={() => { setPropertyInside(false); setFlashProp(false); }}>
                             <Icon icon="mdi:check" width="18" height="18" /> No
                           </Button>
                         </div>
                       </div>
                       {propertyInside === true && (
                         <div className="mt-2 pt-2 border-top">
-                          <div className="small text-muted mb-2">Take photos or videos of the customer&apos;s property inside the vehicle (bags, tools, documents ...).</div>
+                          <div className="small text-muted mb-2">Take photos or videos of the customer's property inside the vehicle (bags, tools, documents ...).</div>
                           <Dropzone onPick={(k) => pick(k, null, "PROPERTY")} onFiles={(f) => dropFiles(f, null, "PROPERTY")} disabled={readOnly} />
                           <MediaThumbs
                             entries={[
@@ -709,7 +718,8 @@ export default function VehicleEvidenceModal({ jobId, onHide, onSaved, preDepart
                 <FormControl as="textarea" rows={2} maxLength={2000} value={more} disabled={readOnly} onChange={(e) => setMore(e.target.value)} placeholder={preDepartment ? "Remark (optional)" : "Any other detail about the condition of the vehicle (optional)"} />
               </div>
 
-              {/* 4. Customer link */}
+              {/* 4. Customer link - shown only after the evidence has been saved at least once */}
+              {linkReady && (
               <div className="bg-white border rounded-3 p-2 px-3">
                 <div className="d-flex flex-wrap justify-content-between align-items-start gap-2">
                   <div>
@@ -741,6 +751,7 @@ export default function VehicleEvidenceModal({ jobId, onHide, onSaved, preDepart
                   </Button>
                 </div>
               </div>
+              )}
             </>
           )}
         </Modal.Body>

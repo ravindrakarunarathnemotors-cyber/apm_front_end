@@ -27,6 +27,10 @@ const extraScopeApi = apiSlice.injectEndpoints({
     sendExtraScopeSms: builder.mutation({         // { jobId, scopeId, phone? } -> { sms: { sent, to?, error? }, total }
       query: ({ jobId, scopeId, ...body }) => ({ url: `${P}/jobs/${jobId}/scopes/${scopeId}/send-sms`, method: "POST", body }),
     }),
+    uploadExtraScopeInventory: builder.mutation({ // { jobId, scopeId } -> { inventory: { sentAt, needsUpload }, parts, quotes }  (spare parts + third-party items -> Inventory & Spare Parts, + notification)
+      query: ({ jobId, scopeId }) => ({ url: `${P}/jobs/${jobId}/scopes/${scopeId}/upload-inventory`, method: "POST" }),
+      invalidatesTags: ["Evidence", "Inventory"],
+    }),
     completeExtraScope: builder.mutation({        // { jobId, scopeId }
       query: ({ jobId, scopeId }) => ({ url: `${P}/jobs/${jobId}/scopes/${scopeId}/complete`, method: "POST" }),
       invalidatesTags: ["Evidence", "Jobs"],
@@ -36,5 +40,5 @@ const extraScopeApi = apiSlice.injectEndpoints({
 
 export const {
   useGetExtraScopesQuery, useGetExtraRepairTreeQuery, useAddExtraScopeMutation, useSaveExtraScopeMutation,
-  useDeleteExtraScopeMutation, useSendExtraScopeSmsMutation, useCompleteExtraScopeMutation,
+  useDeleteExtraScopeMutation, useSendExtraScopeSmsMutation, useUploadExtraScopeInventoryMutation, useCompleteExtraScopeMutation,
 } = extraScopeApi;

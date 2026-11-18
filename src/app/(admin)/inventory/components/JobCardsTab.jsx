@@ -5,7 +5,6 @@ import { Alert, Badge, Button, Modal, Table } from "react-bootstrap";
 import { Icon } from "@iconify/react";
 import { useInvGetQuery } from "@/store/features/apiSlice";
 import OrdersTab from "./OrdersTab";
-import QuotesTab from "./QuotesTab";
 import { Empty, Loader, Panel, StatusBadge, SubTabs, money, qtyFmt, when } from "./inventoryUi";
 
 // Parts of the job that go on the invoice (issued - returned)
@@ -66,23 +65,7 @@ function InvoicePartsPanel() {
   );
 }
 
-// Job card integration: parts reserve -> issue to technician -> return -> invoice. Third-party quotations too.
+// Job cards: the spare part orders of every job (reserve -> issue -> return, third-party quotations)
 export default function JobCardsTab() {
-  const [sub, setSub] = useState("orders");
-  return (
-    <>
-      <SubTabs
-        active={sub}
-        onChange={setSub}
-        tabs={[
-          { key: "orders", label: "Spare part orders", icon: "mdi:clipboard-list-outline" },
-          { key: "quotes", label: "Third-party quotes", icon: "mdi:file-document-edit-outline" },
-          { key: "invoice", label: "Parts for invoice", icon: "mdi:receipt-text-outline" },
-        ]}
-      />
-      {sub === "orders" && <OrdersTab />}
-      {sub === "quotes" && <QuotesTab />}
-      {sub === "invoice" && <InvoicePartsPanel />}
-    </>
-  );
+  return <OrdersTab />;
 }

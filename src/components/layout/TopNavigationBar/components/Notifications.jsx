@@ -33,6 +33,8 @@ const moduleRoutes = {
 
 const Notifications = () => {
   const [page, setPage] = useState(1)
+  const [mineLimit, setMineLimit] = useState(10)      // my notifications: 10 first, +10 on every "See more"
+  const [adminDone, setAdminDone] = useState(false)  // the admin list has no more pages
   const [allNotifications, setAllNotifications] = useState({})
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [hoveredId, setHoveredId] = useState(null)
@@ -48,7 +50,7 @@ const Notifications = () => {
   const [markAsReadMutation] = useMarkNotificationsReadMutation()
 
   // Notifications for me (new job assigned etc.), saved by the backend together with the push
-  const { data: mineData, refetch: refetchMine } = useGetMyNotificationsQuery(undefined, { pollingInterval: 30000 })
+  const { data: mineData, refetch: refetchMine } = useGetMyNotificationsQuery(mineLimit, { pollingInterval: 30000 })
   const [markMineRead] = useMarkMyNotificationsReadMutation()
 
   // Push alerts for this device (on / off) - controlled from inside this dropdown
@@ -134,13 +136,16 @@ const Notifications = () => {
     if (data && !isFetching) {
       setAllNotifications((prev) => {
         const merged = { ...prev }
+        let added = 0, got = 0
         for (const moduleName in data.data) {
           const incoming = data.data[moduleName] || []
           const existing = prev[moduleName] || []
           const existingIds = new Set(existing.map((n) => n.notification_id))
           const newOnes = incoming.filter((n) => !existingIds.has(n.notification_id))
+          got += incoming.length; added += newOnes.length
           merged[moduleName] = [...existing, ...newOnes]
         }
+        if (got === 0 || (page > 1 && added === 0)) setAdminDone(true)
         return merged
       })
     }
@@ -153,7 +158,7 @@ const markNotificationClickAsRead = async (notif) => {
         try { await markMineRead({ ids: [notif._id] }).unwrap(); refetchMine() } catch (err) { console.error(err) }
       }
       setIsRedirecting(true)
-      setTimeout(() => { router.push(notif._url || '/'); setIsRedirecting(false) }, 400)
+      setTimeout(() => { try { window.dispatchEvent(new Event('inventory-orders-refresh')) } catch (_) {} router.push(notif._url || '/'); setIsRedirecting(false) }, 400)
       return
     }
     if (notif.status === 'Unread') {
@@ -179,6 +184,7 @@ const markNotificationClickAsRead = async (notif) => {
 
     setIsRedirecting(true)
     setTimeout(() => {
+      try { window.dispatchEvent(new Event('inventory-orders-refresh')) } catch (_) {}
       router.push(redirectPath)
       setIsRedirecting(false)
     }, 600)
@@ -199,6 +205,10 @@ const markNotificationClickAsRead = async (notif) => {
 
   const flattenedNotifications = [...Object.values(allNotifications).flat(), ...mineNotifications]
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  const hasMoreMine = (mineData?.items?.length || 0) >= mineLimit
+  const hasMore = !adminDone || hasMoreMine
+  const seeMore = (e) => { e.stopPropagation(); if (!adminDone) setPage((p) => p + 1); if (hasMoreMine) setMineLimit((n) => n + 10) }
 
   // Mark everything as read (my notifications + the admin ones that are loaded)
   const markAllRead = async (e) => {
@@ -294,6 +304,11 @@ const markNotificationClickAsRead = async (notif) => {
               </DropdownItem>
             )
           })}
+          {flattenedNotifications.length > 0 && hasMore && (
+            <div className="text-center py-2">
+              <button type="button" className="btn btn-sm btn-light border" onClick={seeMore} disabled={isFetching}>{isFetching ? 'Loading...' : 'See more'}</button>
+            </div>
+          )}
         </SimplebarReactClient>
       </DropdownMenu>
 

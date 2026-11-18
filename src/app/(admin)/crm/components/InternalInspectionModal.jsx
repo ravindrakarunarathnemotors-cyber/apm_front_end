@@ -10,6 +10,7 @@ import {
   useSaveInternalInspectionMutation,
   useSendInternalReminderMutation,
 } from "./internalInspectionApi";
+import { useNotifyCustomerFromInspectionMutation, useNotifyInventoryFromInspectionMutation } from "./clientPartsRemindApi";
 
 // Internal Inspection - 1 (the stage after "Customer Approval"): a confirmation checklist.
 // Props: jobId, onHide, onSaved?({ jobId, stageCompleted })
@@ -21,6 +22,7 @@ const SECTION_UI = {
 };
 const letter = (n) => String.fromCharCode(97 + (n % 26));
 const when = (v) => (v ? new Date(v).toLocaleString() : "");
+// eslint-disable-next-line no-unused-vars
 const toWaNumber = (raw) => {
   const d = String(raw || "").replace(/\D/g, "");
   if (!d) return "";
@@ -73,7 +75,10 @@ export default function InternalInspectionModal({ jobId, onHide, onSaved }) {
   const { data, isLoading, isError, error: loadError, refetch, isFetching } = useGetInternalInspectionQuery(jobId, { skip: !jobId, refetchOnMountOrArgChange: true });
   const [save, { isLoading: saving }] = useSaveInternalInspectionMutation();
   const [complete, { isLoading: completing }] = useCompleteInternalInspectionMutation();
-  const [remind, { isLoading: reminding }] = useSendInternalReminderMutation();
+  const [remindRecord, { isLoading: recording }] = useSendInternalReminderMutation();
+  const [notifyInventory, { isLoading: notifyingInv }] = useNotifyInventoryFromInspectionMutation();
+  const [notifyCustomer, { isLoading: notifyingCus }] = useNotifyCustomerFromInspectionMutation();
+  const reminding = recording || notifyingInv || notifyingCus;
 
   const [checked, setChecked] = useState(null);     // array of item ids
   const [extras, setExtras] = useState([]);          // [{ section, label, checked }]
@@ -152,19 +157,25 @@ export default function InternalInspectionModal({ jobId, onHide, onSaved }) {
     setError("");
     try {
       await doSave();
-      const r = await remind({ jobId, kind: "LOGISTICS" }).unwrap();
-      Swal.fire({ title: "Reminder sent", text: r.sms?.sent ? "Sent to the Logistic & Spare parts division by SMS." : "Recorded for the Logistic & Spare parts division.", icon: "success", timer: 1800, showConfirmButton: false });
+      const n = await notifyInventory({ jobId }).unwrap();          // bell notification + push to Inventory & Spare Parts
+      await remindRecord({ jobId, kind: "LOGISTICS" }).unwrap().catch((e) => console.error("reminder record:", e));   // records "Sent ..." - the notification is already sent, so a failure here must not hide that
+      Swal.fire({ title: "Reminder sent", text: n.notified > 0 ? `${n.notified} user${n.notified === 1 ? "" : "s"} of the Logistic & Spare parts division got the notification.` : "Recorded, but no user with the Inventory & Spare Parts privilege was found.", icon: n.notified > 0 ? "success" : "warning", timer: n.notified > 0 ? 1800 : undefined, showConfirmButton: n.notified === 0 });
     } catch (ex) { setError(ex?.data?.message || "Could not send the reminder."); }
   };
   const customerReminder = async () => {
     setError("");
     try {
       await doSave();
-      const phone = toWaNumber(job.contactNumber);
-      const text = `Dear ${job.customerName}, please bring the spare parts for your vehicle ${job.regNo} (${job.jobNo}) so that we can continue the repair. Thank you.`;
-      if (phone) window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, "_blank", "noopener");
-      await remind({ jobId, kind: "CUSTOMER" }).unwrap();
-      if (!phone) Swal.fire({ title: "Recorded", text: "The customer has no mobile number, so WhatsApp was not opened. Remind the customer manually.", icon: "info" });
+      const ask = await Swal.fire({
+        title: "Send the reminder to the customer", input: "tel", inputLabel: "Mobile number (07XXXXXXXX)", inputValue: job.contactNumber || "", inputPlaceholder: "07XXXXXXXX",
+        showCancelButton: true, confirmButtonText: "Send message",
+        inputValidator: (v) => (/^(?:\+?94|0)?7\d{8}$/.test(String(v).replace(/[\s-]/g, "")) ? undefined : "Enter a valid mobile number (07XXXXXXXX)"),
+      });
+      if (!ask.isConfirmed) return;
+      const r = await notifyCustomer({ jobId, phone: String(ask.value).replace(/[\s-]/g, "") }).unwrap();
+      if (!r.sms?.sent) return Swal.fire({ title: "Message not sent", text: r.sms?.error || "Could not send the message.", icon: "error" });
+      await remindRecord({ jobId, kind: "CUSTOMER" }).unwrap().catch((e) => console.error("reminder record:", e));
+      Swal.fire({ title: "Message sent", text: r.sms.to ? `The reminder was sent to ${r.sms.to}` : "The customer got the reminder.", icon: "success", timer: 1800, showConfirmButton: false });
     } catch (ex) { setError(ex?.data?.message || "Could not send the reminder."); }
   };
 
@@ -238,7 +249,7 @@ export default function InternalInspectionModal({ jobId, onHide, onSaved }) {
                       <div className="fw-semibold small mb-2">The customer brings the spare parts</div>
                       {!readOnly && (
                         <div className="d-flex flex-wrap gap-2 align-items-center">
-                          <Button size="sm" variant="success" disabled={reminding} onClick={customerReminder}><Icon icon="mdi:whatsapp" width="16" height="16" /> Send customer reminder to bring spare parts</Button>
+                          <Button size="sm" variant="success" disabled={reminding} onClick={customerReminder}><Icon icon="mdi:message-alert-outline" width="16" height="16" /> Send customer reminder to bring spare parts</Button>
                           {data.header.customerReminderAt && <span className="small text-success"><Icon icon="mdi:check-circle" width="16" height="16" /> Sent {when(data.header.customerReminderAt)}</span>}
                         </div>
                       )}

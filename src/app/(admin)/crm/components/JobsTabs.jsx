@@ -38,6 +38,13 @@ const CSS = `
   .jt-link svg { width: 18px; height: 18px; }
   .jt-count { min-width: 22px !important; height: 22px !important; font-size: 12px !important; padding: 0 6px !important; }
 }
+@media (max-width: 575.98px) {
+  /* phone: two equal tiles per row (no sideways scrolling); a last odd tile uses the full width */
+  .jt-list { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px !important; }
+  .jt-list .nav-item:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .jt-list .jt-link { width: 100%; min-height: 46px; justify-content: space-between; padding: 6px 10px; }
+  .jt-list .jt-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; text-align: left; }
+}
 @media (prefers-reduced-motion: reduce) { .jt-count, .jt-count.jt-changed { animation: none; } }
 `;
 
@@ -96,7 +103,7 @@ export default function JobsTabs() {
   return (
     <nav className="jt-nav mb-3" aria-label="Departments">
       <style>{CSS}</style>
-      <ul className="nav nav-pills flex-wrap gap-2 pb-1 mb-0">
+      <ul className="jt-list nav nav-pills flex-wrap gap-2 pb-1 mb-0">
         {tabs.map((t, i) => {
           const active = pathname === t.href || pathname.startsWith(`${t.href}/`);
           return (
@@ -113,7 +120,7 @@ export default function JobsTabs() {
               >
                 <Icon icon={t.icon} width="24" height="24" />
                 <span className="d-none d-md-inline">{t.label}</span>
-                <span className="d-md-none">{SHORT[t.label] || t.label}</span>
+                <span className="d-md-none jt-label">{SHORT[t.label] || t.label}</span>
                 <Count value={counts[i]} light={active} />
               </Link>
             </li>

@@ -338,8 +338,10 @@ function ComplaintForm({ data, onHide, onSaved, startNow, onConfirmingChange }) 
         timer: 1800,
         showConfirmButton: false,
       });
-      // tell the dashboard the complaint is done, so it can open the next stage (Team Allocation)
-      onSaved?.({ jobId: job.id, stageCompleted: stageOpen && (!washFlow || startConfirmed || completeStage), started: startConfirmed });
+      // close this window first, then tell the dashboard the complaint is done so it can open the next stage (Team Allocation / Bay / ...)
+      // (a short delay: the next window must not open while this one is still closing, or this one stays open behind it)
+      const done = { jobId: job.id, stageCompleted: stageOpen && (!washFlow || startConfirmed || completeStage), started: startConfirmed };
+      onSaved?.(done);   // handed to the modal wrapper: the next stage window opens only AFTER this window has fully closed
       onHide();
     } catch (err) {
       setConfirming(false);
@@ -502,7 +504,7 @@ function ComplaintForm({ data, onHide, onSaved, startNow, onConfirmingChange }) 
         {/* Write complaint + Shift */}
         <div className="bg-white border rounded p-3 mb-3">
           <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-            <h6 className="fw-bold mb-0">Write Complaint</h6>
+            <h6 className="fw-bold mb-0">Write Concern</h6>
             {stageOpen && otherDepartments.length > 0 && (
               <Button variant="outline-warning" size="sm" onClick={() => setShowShift((v) => !v)} disabled={busy}>
                 <Icon icon="mdi:swap-horizontal" width="18" height="18" /> Shift To Other Department
@@ -681,9 +683,19 @@ export default function ComplaintModal({ jobId, onHide, onSaved, startNow = fals
   const { data, isLoading, isError, error, refetch } = useGetJobComplaintQuery(jobId, { skip: !jobId, refetchOnMountOrArgChange: true });
   const ui = data ? getDepartmentUi(data.job.departmentName) : null;
   const [confirmView, setConfirmView] = useState(false); // the "Stage 4 A" confirmation is showing
+  // Close in two steps: hide with the animation first, then tell the parent (onHide) and open the next stage window (onSaved).
+  // This way the Concern window can never stay open behind the next stage window.
+  const [closing, setClosing] = useState(false);
+  const pendingDone = useRef(null);
+  const requestClose = () => setClosing(true);
+  const afterExit = () => {
+    const done = pendingDone.current; pendingDone.current = null; setClosing(false);
+    onHide?.();
+    if (done) setTimeout(() => onSaved?.(done), 0);
+  };
 
   return (
-    <Modal show={Boolean(jobId)} onHide={onHide} size={confirmView ? "md" : "xl"} fullscreen={confirmView ? false : "md-down"} scrollable centered backdrop="static" dialogClassName={`cm-modal ${confirmView ? "cm-confirm" : ""}`}>
+    <Modal show={Boolean(jobId) && !closing} onHide={requestClose} onExited={afterExit} size={confirmView ? "md" : "xl"} fullscreen={confirmView ? false : "xl-down"} scrollable centered backdrop="static" dialogClassName={`cm-modal ${confirmView ? "cm-confirm" : ""}`}>
       <style>{`
         @media (min-width: 992px) { .modal-dialog.cm-modal { --bs-modal-width: 1000px; } }
         .cm-modal .modal-content { border: 0; border-radius: 18px; overflow: hidden; box-shadow: 0 24px 60px -18px rgba(0,0,0,.6); }
@@ -716,7 +728,7 @@ export default function ComplaintModal({ jobId, onHide, onSaved, startNow = fals
       <Modal.Header closeButton closeVariant="white" className="cm-head">
         <Modal.Title className="fs-5 d-flex align-items-center gap-2 text-white">
           <Icon icon="mdi:message-alert-outline" width="28" height="28" />
-          Customer Complaint recording
+          Customer Concern recording
           {ui && data && <span className="fw-normal small" style={{ color: "rgba(255,255,255,.75)" }}>· {data.job.departmentName}</span>}
         </Modal.Title>
       </Modal.Header>
@@ -738,7 +750,7 @@ export default function ComplaintModal({ jobId, onHide, onSaved, startNow = fals
       )}
 
       {/* key: the form starts fresh for every job / after the department changes */}
-      {data && <ComplaintForm key={`${data.job.id}-${data.job.departmentId}`} data={data} onHide={onHide} onSaved={onSaved} startNow={startNow} onConfirmingChange={setConfirmView} />}
+      {data && <ComplaintForm key={`${data.job.id}-${data.job.departmentId}`} data={data} onHide={requestClose} onSaved={(d) => { pendingDone.current = d; }} startNow={startNow} onConfirmingChange={setConfirmView} />}
     </Modal>
   );
 }
